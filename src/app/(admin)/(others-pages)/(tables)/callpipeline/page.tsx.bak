@@ -1,0 +1,63 @@
+// BACKUP of callpipeline/page.tsx
+// =============
+
+"use client";
+import ComponentCard from "@/components/common/ComponentCard";
+import PageBreadcrumb from "@/components/common/PageBreadCrumb";
+import CallLogsTable from "@/components/tables/CallLogsTable";
+import React from "react";
+import { 
+  PhoneIcon,
+  FireIcon,
+  CalendarIcon,
+  ChartBarIcon,
+  CheckCircleIcon 
+} from "@heroicons/react/24/outline";
+import { callLogsData } from "@/components/tables/sample-data/callLogsData";
+
+const breadcrumbs = [
+    { name: "Home", href: "/" },
+    { name: "Call Pipeline", href: "/callpipeline" }
+  ];
+
+export default function CallPipelinePage() {
+  // Calculate call pipeline statistics
+  const totalCalls = callLogsData.reduce((sum, log) => sum + log.number_of_call, 0);
+  const hotLeads = callLogsData.filter(log => log.last_status === "Hot Lead").length;
+  const followUpRequired = callLogsData.filter(log => log.followUpRequired).length;
+  const siteVisits = callLogsData.reduce((sum, log) => sum + log.number_of_site_visit, 0);
+  const closedWon = callLogsData.filter(log => log.last_status === "Closed Won").length;
+
+  return (
+    <div className="space-y-6">
+      <PageBreadcrumb crumbs={breadcrumbs} />
+      
+      {/* Call Pipeline Statistics Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-6">
+        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Calls</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalCalls}</p>
+            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/10">
+              <PhoneIcon className="h-5 w-5 text-blue-600 dark:text-blue-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-4">
+          <div className="flex items-center justify-between">
+            <div>
+              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Hot Leads</p>
+              <p className="text-2xl font-bold text-gray-900 dark:text-white">{hotLeads}</p>
+            </div>
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-red-50 dark:bg-red-500/10">
+              <FireIcon className="h-5 w-5 text-red-600 dark:text-red-400" />
+            </div>
+          </div>
+        </div>
+
+        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-4">
+          <div className="flex items-center justify-between">
+            <div>

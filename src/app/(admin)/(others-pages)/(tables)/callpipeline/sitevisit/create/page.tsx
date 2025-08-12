@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import api from "@/lib/api";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
 import Button from "@/components/ui/button/Button";
@@ -10,9 +11,9 @@ import Select from "@/components/form/Select";
 import DatePicker from "@/components/form/date-picker";
 import TextArea from "@/components/form/input/TextArea";
 import InputField from "@/components/form/input/InputField";
-import FileInput from "@/components/form/input/FileInput";
 import { TimeIcon } from "@/icons";
 import PhotoUpload, { PhotoFile } from "@/components/form/PhotoUpload";
+import SuccessModal from "@/components/ui/modal/SuccessModal";
 
 interface SelectOption {
   value: string;
@@ -135,7 +136,6 @@ export default function CreateSiteVisitPage() {
     contactResult: null as SelectOption | null,
     purpose: "",
     notes: "",
-    uploadedDocuments: [] as File[],
   });
 
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
@@ -147,21 +147,98 @@ export default function CreateSiteVisitPage() {
     contactResult?: string;
     purpose?: string;
     notes?: string;
-    uploadedDocuments?: string;
   };
 
   const [errors, setErrors] = useState<SiteVisitFormErrors>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
-  // Contact result options
-  const contactResultOptions: SelectOption[] = [
-    { value: "1", label: "Completed" },
-    { value: "2", label: "No Answer" },
-    { value: "3", label: "Busy" },
-    { value: "4", label: "Voicemail" },
-    { value: "5", label: "Cancelled" },
-    { value: "6", label: "Failed" },
-  ];
+  // Contact result options - fetched from API
+  const [contactResultOptions, setContactResultOptions] = useState<SelectOption[]>([]);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(false);
+
+  // Helper function to get contact result name from API data
+  const getContactResultName = (contactResultId: number): string => {
+    if (!contactResultId) return 'Unknown';
+    
+    // First try to get from API-loaded contactResultOptions
+    const statusOption = contactResultOptions.find(option => 
+      option.value === contactResultId.toString()
+    );
+    
+    if (statusOption) {
+      return statusOption.label;
+    }
+    
+    // Fallback to static mapping if contactResultOptions is not loaded yet
+    const staticMapping: Record<number, string> = {
+      1: 'No Answer',
+      2: 'Busy', 
+      3: 'Voicemail',
+      4: 'Cancelled',
+      5: 'Callback',
+      6: 'Interest',
+      7: 'Not Interest',
+      8: 'Schedule Site Visit',
+      9: 'Completed',
+      10: 'Wrong number'
+    };
+    
+    return staticMapping[contactResultId] || 'Unknown';
+  };
+
+  // Fetch contact result options from API
+  useEffect(() => {
+    async function fetchContactResults() {
+      setIsLoadingStatus(true);
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+      // Get token from localStorage
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      
+      try {
+        const response = await fetch(`${apiBase}/contact-result/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ 
+            page_number: "1", 
+            page_size: "100",
+            menu_id: "MU_02",
+            search_type: "",
+            query_search: ""
+          })
+        });
+        const data = await response.json();
+        console.log("Contact Result API response:", data);
+        const apiResult = data[0];
+        if (apiResult && apiResult.data) {
+          setContactResultOptions(apiResult.data.map((result: { contact_result_id: number, contact_result_name: string }) => ({ 
+            value: result.contact_result_id.toString(), 
+            label: result.contact_result_name 
+          })));
+        }
+      } catch (err) {
+        console.error("Contact Result API error:", err);
+        // Fallback to hardcoded options if API fails
+        setContactResultOptions([
+          { value: "1", label: "No Answer" },
+          { value: "2", label: "Busy" },
+          { value: "3", label: "Voicemail" },
+          { value: "4", label: "Cancelled" },
+          { value: "5", label: "Callback" },
+          { value: "6", label: "Interest" },
+          { value: "7", label: "Not Interest" },
+          { value: "8", label: "Schedule Site Visit" },
+          { value: "9", label: "Completed" },
+          { value: "10", label: "Wrong number" }
+        ]);
+      } finally {
+        setIsLoadingStatus(false);
+      }
+    }
+    fetchContactResults();
+  }, []);
 
   const handleChange = (field: keyof typeof formData, value: string | SelectOption | null) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
@@ -172,32 +249,6 @@ export default function CreateSiteVisitPage() {
         return newErrors;
       });
     }
-  };
-
-  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files) {
-      const fileArray = Array.from(files);
-      setFormData((prev) => ({ 
-        ...prev, 
-        uploadedDocuments: [...prev.uploadedDocuments, ...fileArray] 
-      }));
-      // Clear any previous upload errors
-      if (errors.uploadedDocuments) {
-        setErrors(prevErrors => {
-          const newErrors = { ...prevErrors };
-          delete newErrors.uploadedDocuments;
-          return newErrors;
-        });
-      }
-    }
-  };
-
-  const handleRemoveDocument = (index: number) => {
-    setFormData((prev) => ({
-      ...prev,
-      uploadedDocuments: prev.uploadedDocuments.filter((_, i) => i !== index)
-    }));
   };
 
   const validate = () => {
@@ -222,19 +273,61 @@ export default function CreateSiteVisitPage() {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Upload single photo function (following lead edit pattern)
+  const uploadPhotoToStorage = async (photoFile: File, siteVisitId: string): Promise<string> => {
+    const photoFormData = new FormData();
+    photoFormData.append('photo', photoFile);
+    photoFormData.append('menu', 'site_visit');
+    photoFormData.append('photoId', String(siteVisitId));
+    
+    const uploadResponse = await api.post('/files/upload-one-photo', photoFormData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    
+    console.log('Upload response:', uploadResponse.data);
+    console.log('Extracted imageUrl:', uploadResponse.data.imageUrl);
+    
+    // Extract the imageUrl from the response
+    const imageUrl = uploadResponse.data.imageUrl;
+    if (!imageUrl) {
+      throw new Error('No imageUrl returned from upload response');
+    }
+    
+    return imageUrl;
+  };
+
   const handleSave = async () => { 
     if (!validate() || !pipelineInfo) return;
     
     try {
       setIsSubmitting(true);
       
-      // Prepare photo URLs - for now we'll use placeholder URLs since we need file upload handling
+      // Upload photos first (following lead pattern)
       const photoUrls: string[] = [];
-      photos.forEach((photo, index) => {
-        // In a real implementation, you'd upload the file to a storage service first
-        // and get back the actual URL. For now, using placeholder.
-        photoUrls.push(`https://example.com/photos/site_visit_${Date.now()}_${index}.jpg`);
-      });
+      if (photos.length > 0) {
+        console.log("Uploading photos:", photos.length);
+        try {
+          // First, create a temporary site visit ID for photo uploads
+          const tempSiteVisitId = `SV-${Date.now()}`;
+          
+          // Upload photos one by one following lead edit pattern
+          for (const photoFile of photos) {
+            if (photoFile.file) {
+              console.log(`Uploading photo: ${photoFile.name}`);
+              const uploadedUrl = await uploadPhotoToStorage(photoFile.file, tempSiteVisitId);
+              photoUrls.push(uploadedUrl);
+              console.log("Successfully uploaded photo, URL:", uploadedUrl);
+            }
+          }
+          console.log('Final photo URLs array:', photoUrls);
+        } catch (error) {
+          console.error("Error uploading photos:", error);
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+          alert(`Error uploading photos: ${errorMessage}`);
+          setIsSubmitting(false);
+          return;
+        }
+      }
       
       // Format datetime strings for API
       const startDatetime = `${formData.visitDate} ${formData.visitStartTime}:00`;
@@ -255,6 +348,11 @@ export default function CreateSiteVisitPage() {
         photo_url: photoUrls,
         remark: formData.notes
       };
+      
+      console.log("Site Visit Data to submit:");
+      console.log("- photo_url array:", apiRequestBody.photo_url);
+      console.log("- photo_url length:", apiRequestBody.photo_url.length);
+      console.log("Full apiRequestBody:", apiRequestBody);
       
       console.log("Site Visit API Request Body:", apiRequestBody);
       console.log("Site Visit API Request Body (JSON):", JSON.stringify(apiRequestBody, null, 2));
@@ -284,7 +382,7 @@ export default function CreateSiteVisitPage() {
       console.log("Site Visit Create API Response:", responseData);
       
       // Show success message
-      alert("Site visit created successfully!");
+      setShowSuccessModal(true);
       
       // Redirect back to site visit page
       router.push(`/callpipeline/sitevisit?pipelineId=${pipelineId}`);
@@ -298,6 +396,11 @@ export default function CreateSiteVisitPage() {
   };
 
   const handleCancel = () => {
+    router.push(`/callpipeline/sitevisit?pipelineId=${pipelineId}`);
+  };
+
+  const handleSuccessModalClose = () => {
+    setShowSuccessModal(false);
     router.push(`/callpipeline/sitevisit?pipelineId=${pipelineId}`);
   };
 
@@ -479,6 +582,14 @@ export default function CreateSiteVisitPage() {
           </div>
         </div>
       </ComponentCard>
+
+      {/* Success Modal */}
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={handleSuccessModalClose}
+        title="Site Visit Created Successfully!"
+        message="The site visit has been created and saved to the system."
+      />
     </div>
   );
 }

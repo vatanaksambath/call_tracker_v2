@@ -87,24 +87,96 @@ export default function QuickCallCreatePage() {
     callStartTime: "",
     callEndTime: "",
     callStatus: null as SelectOption | null,
+    contactInfo: null as SelectOption | null,
     notes: "",
+    isFollowUp: false,
+    followUpDate: null as Date | null,
   });
 
   const [errors, setErrors] = useState<{[key: string]: string}>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [statusOptions, setStatusOptions] = useState<SelectOption[]>([]);
 
-  const statusOptions: SelectOption[] = [
-    { value: "answered", label: "Answered" },
-    { value: "no-answer", label: "No Answer" },
-    { value: "busy", label: "Busy" },
-    { value: "voicemail", label: "Voicemail" },
-    { value: "callback-requested", label: "Callback Requested" },
-    { value: "not-interested", label: "Not Interested" },
-    { value: "follow-up-scheduled", label: "Follow-up Scheduled" },
-  ];
+  // Helper function to get contact result name
+  const getContactResultName = (contactResultId: number): string => {
+    // First try to get from API-loaded options
+    const option = statusOptions.find(opt => opt.value === contactResultId.toString());
+    if (option) {
+      return option.label;
+    }
+    
+    // Fallback to static mapping if API data not loaded yet
+    const staticMapping: { [key: number]: string } = {
+      1: "No Answer",
+      2: "Busy", 
+      3: "Voicemail",
+      4: "Answered",
+      5: "Callback Requested",
+      6: "Not Interested",
+      7: "Follow-up Scheduled"
+    };
+    
+    return staticMapping[contactResultId] || "Unknown";
+  };
 
-  const handleChange = (field: keyof typeof formData, value: Date | string | SelectOption | null) => {
+  // Load contact result options from API
+  useEffect(() => {
+    const loadContactResults = async () => {
+      try {
+        const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+        let baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+        baseUrl = baseUrl.replace(/\/+$/, "");
+        const endpoint = `${baseUrl}/contact-result/pagination`;
+        
+        const response = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+          },
+          body: JSON.stringify({
+            page_number: "1",
+            page_size: "50",
+          }),
+        });
+        
+        if (response.ok) {
+          const data = await response.json();
+          let contactResults = [];
+          
+          if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
+            contactResults = data[0].data;
+          } else if (Array.isArray(data?.data)) {
+            contactResults = data.data;
+          }
+          
+          const options = contactResults.map((result: any) => ({
+            value: result.contact_result_id.toString(),
+            label: result.contact_result_name
+          }));
+          
+          setStatusOptions(options);
+        }
+      } catch (error) {
+        console.error("Error loading contact results:", error);
+        // Set fallback options if API fails
+        setStatusOptions([
+          { value: "1", label: "No Answer" },
+          { value: "2", label: "Busy" },
+          { value: "3", label: "Voicemail" },
+          { value: "4", label: "Answered" },
+          { value: "5", label: "Callback Requested" },
+          { value: "6", label: "Not Interested" },
+          { value: "7", label: "Follow-up Scheduled" },
+        ]);
+      }
+    };
+    
+    loadContactResults();
+  }, []);
+
+  const handleChange = (field: keyof typeof formData, value: Date | string | SelectOption | null | boolean) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors(prevErrors => {
@@ -122,6 +194,11 @@ export default function QuickCallCreatePage() {
     if (!formData.callStartTime) newErrors.callStartTime = "Start time is required.";
     if (!formData.callStatus) newErrors.callStatus = "Call status is required.";
     if (!formData.notes.trim()) newErrors.notes = "Call notes are required.";
+    
+    // Validate follow-up date if follow-up is required
+    if (formData.isFollowUp && !formData.followUpDate) {
+      newErrors.followUpDate = "Follow-up date is required when follow-up is enabled.";
+    }
     
     // Validate time format and logic
     if (formData.callStartTime && formData.callEndTime) {
@@ -149,6 +226,8 @@ export default function QuickCallCreatePage() {
         callEndTime: formData.callEndTime,
         callStatus: formData.callStatus?.value,
         notes: formData.notes,
+        isFollowUp: formData.isFollowUp,
+        followUpDate: formData.followUpDate,
         createdAt: new Date().toISOString(),
       };
       
@@ -179,7 +258,10 @@ export default function QuickCallCreatePage() {
       callStartTime: "",
       callEndTime: "",
       callStatus: null,
+      contactInfo: null,
       notes: "",
+      isFollowUp: false,
+      followUpDate: null,
     });
     setErrors({});
   };
@@ -197,7 +279,10 @@ export default function QuickCallCreatePage() {
       callStartTime: "",
       callEndTime: "",
       callStatus: null,
+      contactInfo: null,
       notes: "",
+      isFollowUp: false,
+      followUpDate: null,
     });
     setErrors({});
   };
@@ -327,11 +412,40 @@ export default function QuickCallCreatePage() {
       >
         <div className="mb-6">
           <h4 className="mb-2 text-2xl font-semibold text-gray-800 dark:text-white/90">
-            Input Information
+            Quick Call Entry
           </h4>
           <p className="text-sm text-gray-500 dark:text-gray-400">
-            Enter the call details below.
+            Add a call log entry for Pipeline #{pipelineInfo.pipelineId}
           </p>
+        </div>
+
+        {/* Pipeline Summary */}
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-6">
+          <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-3 dark:border-gray-700 dark:from-blue-900/20 dark:to-indigo-900/20">
+            <div className="space-y-1">
+              <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Pipeline</h3>
+              <p className="text-sm font-bold text-blue-800 dark:text-blue-200">#{pipelineInfo.pipelineId}</p>
+            </div>
+          </div>
+          
+          <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-green-50 to-emerald-50 p-3 dark:border-gray-700 dark:from-green-900/20 dark:to-emerald-900/20">
+            <div className="space-y-1">
+              <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Lead</h3>
+              <p className="text-sm font-bold text-green-800 dark:text-green-200">{pipelineInfo.leadName}</p>
+              {pipelineInfo.callerPhone && (
+                <p className="text-xs text-green-600 dark:text-green-300">
+                  {pipelineInfo.callerPhone}
+                </p>
+              )}
+            </div>
+          </div>
+          
+          <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-purple-50 to-pink-50 p-3 dark:border-gray-700 dark:from-purple-900/20 dark:to-pink-900/20">
+            <div className="space-y-1">
+              <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Property</h3>
+              <p className="text-sm font-bold text-purple-800 dark:text-purple-200">{pipelineInfo.propertyName}</p>
+            </div>
+          </div>
         </div>
         
         <div className="grid grid-cols-1 gap-x-6 gap-y-5 lg:grid-cols-4">
@@ -395,6 +509,48 @@ export default function QuickCallCreatePage() {
             />
             {errors.callStatus && <p className="text-sm text-red-500 mt-1">{errors.callStatus}</p>}
           </div>
+
+          {/* Follow-up Section */}
+          <div>
+            <Label htmlFor="followUpToggle">Follow-up Required</Label>
+            <div className="flex items-center">
+              <label className="inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  id="followUpToggle"
+                  checked={formData.isFollowUp}
+                  onChange={(e) => handleChange('isFollowUp', e.target.checked)}
+                  className="sr-only"
+                />
+                <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
+                  formData.isFollowUp ? 'bg-brand-500' : 'bg-gray-200 dark:bg-gray-700'
+                }`}>
+                  <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${
+                    formData.isFollowUp ? 'transform translate-x-5' : ''
+                  }`}></div>
+                </div>
+              </label>
+            </div>
+            {errors.isFollowUp && <p className="text-sm text-red-500 mt-1">{errors.isFollowUp}</p>}
+          </div>
+
+          {/* Follow-up Date - Show when toggle is on */}
+          {formData.isFollowUp && (
+            <div>
+              <DatePicker
+                id="follow-up-date-picker"
+                label="Follow-up Date *"
+                placeholder="Select date"
+                value={formData.followUpDate || undefined}
+                onChange={(selectedDates) => {
+                  if (selectedDates && selectedDates.length > 0) {
+                    handleChange('followUpDate', selectedDates[0]);
+                  }
+                }}
+              />
+              {errors.followUpDate && <p className="text-sm text-red-500 mt-1">{errors.followUpDate}</p>}
+            </div>
+          )}
         </div>
 
         {/* Notes - Full width */}

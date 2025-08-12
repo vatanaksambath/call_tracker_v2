@@ -26,14 +26,36 @@ const parseDateString = (dateString: string | null): Date | null => {
     return new Date(date.valueOf() + date.getTimezoneOffset() * 60 * 1000);
 }
 
-export const formatDateForAPI = (date: Date | null): string | null => {
+export const formatDateForAPI = (date: Date | string | null | undefined): string | null => {
     if (!date) return null;
-
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
-    const day = String(date.getDate()).padStart(2, '0');
-
-    return `${year}-${month}-${day}`;
+    
+    // If it's already a string, return it as is (assuming it's in YYYY-MM-DD format)
+    if (typeof date === 'string') {
+        return date;
+    }
+    
+    // If it's a Date object, format it
+    if (date instanceof Date) {
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0'); // Months are 0-indexed
+        const day = String(date.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    }
+    
+    // If it's neither string nor Date, try to create a Date object
+    try {
+        const parsedDate = new Date(date as string | number);
+        if (isNaN(parsedDate.getTime())) {
+            return null;
+        }
+        const year = parsedDate.getFullYear();
+        const month = String(parsedDate.getMonth() + 1).padStart(2, '0');
+        const day = String(parsedDate.getDate()).padStart(2, '0');
+        return `${year}-${month}-${day}`;
+    } catch (error) {
+        console.error('Error formatting date:', error);
+        return null;
+    }
 };
 
 export const getUserFromToken = (): { staff_id: string } | null => {

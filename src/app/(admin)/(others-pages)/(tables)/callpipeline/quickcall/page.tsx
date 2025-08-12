@@ -167,6 +167,36 @@ export default function QuickCallPage() {
     }
   };
 
+  // Helper function to get contact result name from API data
+  const getContactResultName = (contactResultId: number): string => {
+    if (!contactResultId) return 'Unknown';
+    
+    // First try to get from API-loaded statusOptions
+    const statusOption = statusOptions.find(option => 
+      option.value === contactResultId.toString()
+    );
+    
+    if (statusOption) {
+      return statusOption.label;
+    }
+    
+    // Fallback to static mapping if statusOptions is not loaded yet
+    const staticMapping: Record<number, string> = {
+      1: 'No Answer',
+      2: 'Busy', 
+      3: 'Voicemail',
+      4: 'Cancelled',
+      5: 'Callback',
+      6: 'Interest',
+      7: 'Not Interest',
+      8: 'Schedule Site Visit',
+      9: 'Completed',
+      10: 'Wrong number'
+    };
+    
+    return staticMapping[contactResultId] || 'Unknown';
+  };
+
   // Helper function to format date strings - same as view page
   const formatDate = (dateString: string | null): string => {
     if (!dateString) return 'N/A';
@@ -307,12 +337,7 @@ export default function QuickCallPage() {
               callDate: detail.call_date || 'N/A',
               callStartTime: detail.call_start_datetime || 'N/A', // Use full datetime, formatTime will handle it
               callEndTime: detail.call_end_datetime || 'N/A', // Use full datetime, formatTime will handle it
-              callStatus: detail.contact_result_id === 1 ? 'Completed' : 
-                         detail.contact_result_id === 2 ? 'No Answer' :
-                         detail.contact_result_id === 3 ? 'Busy' :
-                         detail.contact_result_id === 4 ? 'Voicemail' :
-                         detail.contact_result_id === 5 ? 'Cancelled' :
-                         detail.contact_result_id === 6 ? 'Failed' : 'Unknown', // Enhanced status mapping
+              callStatus: getContactResultName(detail.contact_result_id), // Dynamic status mapping from API
               notes: detail.remark || 'No notes',
               createdAt: detail.created_date || 'N/A',
               // Add the extracted contact information
@@ -322,12 +347,7 @@ export default function QuickCallPage() {
               totalCallMinute: detail.total_call_minute || 0,
               // Add new fields for table display
               contactResultId: detail.contact_result_id || 0,
-              contactResultName: detail.contact_result_id === 1 ? 'Completed' : 
-                               detail.contact_result_id === 2 ? 'No Answer' :
-                               detail.contact_result_id === 3 ? 'Busy' :
-                               detail.contact_result_id === 4 ? 'Voicemail' :
-                               detail.contact_result_id === 5 ? 'Cancelled' :
-                               detail.contact_result_id === 6 ? 'Failed' : 'Unknown',
+              contactResultName: getContactResultName(detail.contact_result_id), // Dynamic status mapping from API
               callerName: log.created_by_name || 'Unknown'
             };
           });
@@ -356,6 +376,8 @@ export default function QuickCallPage() {
     callStatus: null as SelectOption | null,
     contactInfo: null as SelectOption | null, // Add contact selection
     notes: "",
+    isFollowUp: false,
+    followUpDate: null as Date | null,
   });
 
   type CallLogFormErrors = {
@@ -365,6 +387,8 @@ export default function QuickCallPage() {
     callStatus?: string;
     contactInfo?: string;
     notes?: string;
+    isFollowUp?: string;
+    followUpDate?: string;
   };
 
   const [errors, setErrors] = useState<CallLogFormErrors>({});
@@ -379,6 +403,8 @@ export default function QuickCallPage() {
     callEndTime: "",
     callStatus: null as SelectOption | null,
     notes: "",
+    isFollowUp: false,
+    followUpDate: null as Date | null,
   });
   const [editErrors, setEditErrors] = useState<CallLogFormErrors>({});
 
@@ -391,15 +417,69 @@ export default function QuickCallPage() {
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [leadContactData, setLeadContactData] = useState<ContactData[]>([]); // Store full contact data
 
-  // Call status options for Call Log History
-  const statusOptions: SelectOption[] = [
-    { value: "Completed", label: "Completed" },
-    { value: "No Answer", label: "No Answer" },
-    { value: "Busy", label: "Busy" },
-    { value: "Voicemail", label: "Voicemail" },
-    { value: "Cancelled", label: "Cancelled" },
-    { value: "Failed", label: "Failed" },
-  ];
+  // Call status options - fetched from API
+  const [statusOptions, setStatusOptions] = useState<SelectOption[]>([]);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(false);
+
+  // Fetch contact result options from API
+  useEffect(() => {
+    async function fetchContactResults() {
+      setIsLoadingStatus(true);
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+      // Get token from localStorage
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      
+      try {
+        const response = await fetch(`${apiBase}/contact-result/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ 
+            page_number: "1", 
+            page_size: "100",
+            menu_id: "MU_02",
+            search_type: "",
+            query_search: ""
+          })
+        });
+        const data = await response.json();
+        console.log("Contact Result API response:", data);
+        const apiResult = data[0];
+        if (apiResult && apiResult.data) {
+          setStatusOptions(apiResult.data.map((result: { contact_result_id: number, contact_result_name: string }) => ({ 
+            value: result.contact_result_id.toString(), 
+            label: result.contact_result_name 
+          })));
+        }
+      } catch (err) {
+        console.error("Contact Result API error:", err);
+        // Fallback to hardcoded options if API fails
+        setStatusOptions([
+          { value: "1", label: "No Answer" },
+          { value: "2", label: "Busy" },
+          { value: "3", label: "Voicemail" },
+          { value: "4", label: "Cancelled" },
+          { value: "5", label: "Callback" },
+          { value: "6", label: "Interest" },
+          { value: "7", label: "Not Interest" },
+          { value: "8", label: "Schedule Site Visit" },
+          { value: "9", label: "Completed" },
+          { value: "10", label: "Wrong number" }
+        ]);
+      } finally {
+        setIsLoadingStatus(false);
+      }
+    }
+    fetchContactResults();
+  }, []);
+
+  // Reload pipeline info when statusOptions are loaded to update status names
+  useEffect(() => {
+    if (statusOptions.length > 0 && pipelineId) {
+      loadPipelineInfo();
+    }
+  }, [statusOptions, pipelineId, loadPipelineInfo]);
 
   // Fetch contact data for dropdown when modal opens
   useEffect(() => {
@@ -484,7 +564,7 @@ export default function QuickCallPage() {
   // Get call log history for this pipeline - now using state instead of inline calculation
   const pipelineCallHistory = callLogHistory;
 
-  const handleChange = (field: keyof typeof formData, value: string | SelectOption | null | Date) => {
+  const handleChange = (field: keyof typeof formData, value: string | SelectOption | null | Date | boolean) => {
     setFormData((prev) => ({ ...prev, [field]: value }));
     if (errors[field]) {
       setErrors(prevErrors => {
@@ -503,6 +583,11 @@ export default function QuickCallPage() {
     if (!formData.callStatus) newErrors.callStatus = "Call status is required.";
     if (!formData.contactInfo) newErrors.contactInfo = "Contact information is required.";
     if (!formData.notes.trim()) newErrors.notes = "Notes are required.";
+    
+    // Validate follow-up date if follow-up is required
+    if (formData.isFollowUp && !formData.followUpDate) {
+      newErrors.followUpDate = "Follow-up date is required when follow-up is enabled.";
+    }
     
     // Validate end time is after start time if both are provided
     if (formData.callStartTime && formData.callEndTime) {
@@ -529,6 +614,8 @@ export default function QuickCallPage() {
       callStatus: null,
       contactInfo: null,
       notes: "",
+      isFollowUp: false,
+      followUpDate: null,
     });
     setErrors({});
     
@@ -595,19 +682,6 @@ export default function QuickCallPage() {
         ? `${callDate} ${formData.callEndTime}:00`
         : "";
 
-      // Map status to contact_result_id (you may need to adjust this mapping)
-      const getContactResultId = (status: string): string => {
-        switch (status) {
-          case "Completed": return "1";
-          case "No Answer": return "2";
-          case "Busy": return "3";
-          case "Voicemail": return "4";
-          case "Cancelled": return "5";
-          case "Failed": return "6";
-          default: return "1";
-        }
-      };
-
       // Prepare the single contact data - ensuring only one contact is sent
       const singleContactData = {
         channel_type_id: String(selectedContactGroup.channel_type_id),
@@ -625,10 +699,17 @@ export default function QuickCallPage() {
       console.log("Contact values length:", singleContactData.contact_values.length);
       console.log("Selected contact details:", selectedContact);
 
+      // Debug logging for contact result
+      console.log("Selected contact result:", {
+        label: formData.callStatus?.label,
+        value: formData.callStatus?.value,
+        note: "This value should be the contact_result_id from API"
+      });
+
       // Prepare API request body
       const apiRequestBody = {
         call_log_id: pipelineInfo.pipelineId,
-        contact_result_id: getContactResultId(formData.callStatus?.value || ""),
+        contact_result_id: formData.callStatus?.value || "1", // Direct use of API value
         call_start_datetime: callStartDatetime,
         call_end_datetime: callEndDatetime,
         remark: formData.notes || null,
@@ -779,6 +860,8 @@ export default function QuickCallPage() {
       callEndTime: endTime,
       callStatus: statusOption || null,
       notes: log.notes || '',
+      isFollowUp: false, // TODO: Extract from log data when available
+      followUpDate: null, // TODO: Extract from log data when available
     });
     
     // Clear any previous errors
@@ -817,7 +900,7 @@ export default function QuickCallPage() {
   };
 
   // Edit modal handlers
-  const handleEditFormChange = (field: keyof typeof editFormData, value: string | SelectOption | null | Date) => {
+  const handleEditFormChange = (field: keyof typeof editFormData, value: string | SelectOption | null | Date | boolean) => {
     setEditFormData((prev) => ({ ...prev, [field]: value }));
     if (editErrors[field]) {
       setEditErrors(prevErrors => {
@@ -835,6 +918,11 @@ export default function QuickCallPage() {
     if (!editFormData.callStartTime) newErrors.callStartTime = "Start time is required.";
     if (!editFormData.callStatus) newErrors.callStatus = "Call status is required.";
     if (!editFormData.notes.trim()) newErrors.notes = "Notes are required.";
+    
+    // Validate follow-up date if follow-up is required
+    if (editFormData.isFollowUp && !editFormData.followUpDate) {
+      newErrors.followUpDate = "Follow-up date is required when follow-up is enabled.";
+    }
     
     // Validate end time is after start time if both are provided
     if (editFormData.callStartTime && editFormData.callEndTime) {
@@ -858,34 +946,78 @@ export default function QuickCallPage() {
       if (token) headers["Authorization"] = `Bearer ${token}`;
       
       // Get the call log detail data which contains the contact_data
-      const body = {
+      // Try searching by call_log_detail_id first, fallback to call_log_id
+      let body = {
         page_number: "1",
         page_size: "10",
-        search_type: "call_log_id",
-        query_search: pipelineId,
+        search_type: "call_log_detail_id",
+        query_search: callLogDetailId,
       };
       
       console.log("Fetching contact data for edit, call log detail ID:", callLogDetailId);
+      console.log("First attempt - searching by call_log_detail_id:", body);
       
-      const res = await fetch(`${apiBase}/call-log/pagination`, {
+      let res = await fetch(`${apiBase}/call-log/pagination`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
       });
       
+      if (!res.ok) {
+        console.log("First attempt failed, trying search by call_log_id");
+        // Fallback to searching by call_log_id
+        body = {
+          page_number: "1",
+          page_size: "10",
+          search_type: "call_log_id",
+          query_search: pipelineId,
+        };
+        
+        res = await fetch(`${apiBase}/call-log/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify(body),
+        });
+      }
+      
       if (!res.ok) throw new Error("Failed to fetch call log data for edit");
       
       const data = await res.json();
+      console.log("Full API response for edit contact data:", data);
       
       // Find the specific call log detail by ID
       let targetDetail = null;
       if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
         const log = data[0].data[0];
-        if (log.call_log_details && Array.isArray(log.call_log_details)) {
+        console.log("Call log data structure:", log);
+        
+        if (log && log.call_log_details && Array.isArray(log.call_log_details)) {
+          console.log("Found call_log_details:", log.call_log_details);
           targetDetail = log.call_log_details.find((detail: CallLogDetail) => 
             detail.call_log_detail_id === callLogDetailId
           );
+          console.log("Target detail found:", targetDetail);
+        } else {
+          console.warn("No call_log_details found in log structure, checking if data is direct detail array");
+          console.log("Available properties in log:", log ? Object.keys(log) : 'log is null/undefined');
+          
+          // Try alternative approach - maybe the data is already the detail we need
+          if (log && log.call_log_detail_id === callLogDetailId) {
+            console.log("Found direct match with call_log_detail_id");
+            targetDetail = log;
+          } else {
+            // Try searching in the entire data array
+            for (const item of data[0].data) {
+              if (item && item.call_log_detail_id === callLogDetailId) {
+                console.log("Found matching detail in data array");
+                targetDetail = item;
+                break;
+              }
+            }
+          }
         }
+      } else {
+        console.warn("Unexpected data structure:", data);
       }
       
       if (targetDetail && targetDetail.contact_data && Array.isArray(targetDetail.contact_data)) {
@@ -948,24 +1080,18 @@ export default function QuickCallPage() {
         ? `${callDate} ${editFormData.callEndTime}:00`
         : "";
 
-      // Map status to contact_result_id
-      const getContactResultId = (status: string): string => {
-        switch (status) {
-          case "Completed": return "1";
-          case "No Answer": return "2";
-          case "Busy": return "3";
-          case "Voicemail": return "4";
-          case "Cancelled": return "5";
-          case "Failed": return "6";
-          default: return "1";
-        }
-      };
+      // Debug logging for contact result
+      console.log("Edit selected contact result:", {
+        label: editFormData.callStatus?.label,
+        value: editFormData.callStatus?.value,
+        note: "This value should be the contact_result_id from API"
+      });
 
       // Prepare API request body following the same format as create page
       const apiRequestBody = {
         call_log_id: pipelineInfo.pipelineId,
         call_log_detail_id: editingCallLog.detailId,
-        contact_result_id: getContactResultId(editFormData.callStatus?.value || ""),
+        contact_result_id: editFormData.callStatus?.value || "1", // Direct use of API value
         call_start_datetime: callStartDatetime,
         call_end_datetime: callEndDatetime,
         remark: editFormData.notes || null,
@@ -1037,6 +1163,8 @@ export default function QuickCallPage() {
       callEndTime: "",
       callStatus: null,
       notes: "",
+      isFollowUp: false,
+      followUpDate: null,
     });
     setEditErrors({});
     setEditingCallLog(null);
@@ -1671,12 +1799,43 @@ export default function QuickCallPage() {
       >
         <div className="px-2 lg:pr-14">
           <h4 className="mb-2 text-2xl font-semibold text-gray-800 dark:text-white/90">
-            Add Call Log Entry
+            Quick Call Entry
           </h4>
           <p className="mb-6 text-sm text-gray-500 dark:text-gray-400 lg:mb-7">
-            Fill in the details for this call log entry for Pipeline #{pipelineInfo.pipelineId}
+            Add a call log entry for Pipeline #{pipelineInfo?.pipelineId}
           </p>
         </div>
+
+        {/* Pipeline Summary */}
+        {pipelineInfo && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-6">
+            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-3 dark:border-gray-700 dark:from-blue-900/20 dark:to-indigo-900/20">
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Pipeline</h3>
+                <p className="text-sm font-bold text-blue-800 dark:text-blue-200">#{pipelineInfo.pipelineId}</p>
+              </div>
+            </div>
+            
+            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-green-50 to-emerald-50 p-3 dark:border-gray-700 dark:from-green-900/20 dark:to-emerald-900/20">
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Lead</h3>
+                <p className="text-sm font-bold text-green-800 dark:text-green-200">{pipelineInfo.leadName}</p>
+                {pipelineInfo.callerPhone && (
+                  <p className="text-xs text-green-600 dark:text-green-300">
+                    {pipelineInfo.callerPhone}
+                  </p>
+                )}
+              </div>
+            </div>
+            
+            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-purple-50 to-pink-50 p-3 dark:border-gray-700 dark:from-purple-900/20 dark:to-pink-900/20">
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Property</h3>
+                <p className="text-sm font-bold text-purple-800 dark:text-purple-200">{pipelineInfo.propertyName}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="space-y-6">
           <div className="grid grid-cols-1 gap-x-6 gap-y-5 lg:grid-cols-4">
@@ -1737,17 +1896,59 @@ export default function QuickCallPage() {
             <div>
               <Label htmlFor="callStatus">Call Status *</Label>
               <Select
-                placeholder="Select status"
+                placeholder={isLoadingStatus ? "Loading statuses..." : "Select status"}
                 options={statusOptions}
                 value={formData.callStatus}
                 onChange={(option) => handleChange('callStatus', option)}
               />
               {errors.callStatus && <p className="text-sm text-red-500 mt-1">{errors.callStatus}</p>}
             </div>
+
+            {/* Follow-up Section */}
+            <div>
+              <Label htmlFor="followUpToggle">Follow-up Required</Label>
+              <div className="flex items-center">
+                <label className="inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    id="followUpToggle"
+                    checked={formData.isFollowUp}
+                    onChange={(e) => handleChange('isFollowUp', e.target.checked)}
+                    className="sr-only"
+                  />
+                  <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
+                    formData.isFollowUp ? 'bg-brand-500' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}>
+                    <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${
+                      formData.isFollowUp ? 'transform translate-x-5' : ''
+                    }`}></div>
+                  </div>
+                </label>
+              </div>
+              {errors.isFollowUp && <p className="text-sm text-red-500 mt-1">{errors.isFollowUp}</p>}
+            </div>
+
+            {/* Follow-up Date - Show when toggle is on */}
+            {formData.isFollowUp && (
+              <div>
+                <DatePicker
+                  id="follow-up-date-picker"
+                  label="Follow-up Date *"
+                  placeholder="Select date"
+                  defaultDate={formData.followUpDate || undefined}
+                  onChange={(selectedDates) => {
+                    if (selectedDates && selectedDates.length > 0) {
+                      handleChange('followUpDate', selectedDates[0]);
+                    }
+                  }}
+                />
+                {errors.followUpDate && <p className="text-sm text-red-500 mt-1">{errors.followUpDate}</p>}
+              </div>
+            )}
           </div>
 
-          {/* Contact Information - Full width row */}
-          <div>
+          {/* Contact Information - Hidden for now, but kept for API data fetching */}
+          <div style={{ display: 'none' }}>
             <Label htmlFor="contactInfo">Contact Information *</Label>
             <Select
               placeholder={isLoadingContacts ? "Loading contacts..." : "Select contact"}
@@ -1789,7 +1990,7 @@ export default function QuickCallPage() {
               onClick={handleSave}
               disabled={isSubmitting}
             >
-              {isSubmitting ? "Saving..." : "Add Call Log"}
+              {isSubmitting ? "Saving..." : "Save Call Log"}
             </Button>
           </div>
         </div>
@@ -1843,12 +2044,43 @@ export default function QuickCallPage() {
       >
         <div className="px-2 lg:pr-14">
           <h4 className="mb-2 text-2xl font-semibold text-gray-800 dark:text-white/90">
-            Edit Call Log Entry
+            Edit Quick Call Entry
           </h4>
           <p className="mb-6 text-sm text-gray-500 dark:text-gray-400 lg:mb-7">
-            Update the details for this call log entry
+            Update the call log entry for Pipeline #{pipelineInfo?.pipelineId}
           </p>
         </div>
+
+        {/* Pipeline Summary */}
+        {pipelineInfo && (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-6">
+            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-3 dark:border-gray-700 dark:from-blue-900/20 dark:to-indigo-900/20">
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Pipeline</h3>
+                <p className="text-sm font-bold text-blue-800 dark:text-blue-200">#{pipelineInfo.pipelineId}</p>
+              </div>
+            </div>
+            
+            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-green-50 to-emerald-50 p-3 dark:border-gray-700 dark:from-green-900/20 dark:to-emerald-900/20">
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Lead</h3>
+                <p className="text-sm font-bold text-green-800 dark:text-green-200">{pipelineInfo.leadName}</p>
+                {pipelineInfo.callerPhone && (
+                  <p className="text-xs text-green-600 dark:text-green-300">
+                    {pipelineInfo.callerPhone}
+                  </p>
+                )}
+              </div>
+            </div>
+            
+            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-purple-50 to-pink-50 p-3 dark:border-gray-700 dark:from-purple-900/20 dark:to-pink-900/20">
+              <div className="space-y-1">
+                <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Property</h3>
+                <p className="text-sm font-bold text-purple-800 dark:text-purple-200">{pipelineInfo.propertyName}</p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Call Log Information Card */}
         <div className="mb-6 rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark">
@@ -1964,13 +2196,55 @@ export default function QuickCallPage() {
             <div>
               <Label htmlFor="editCallStatus">Call Status *</Label>
               <Select
-                placeholder="Select status"
+                placeholder={isLoadingStatus ? "Loading statuses..." : "Select status"}
                 options={statusOptions}
                 value={editFormData.callStatus}
                 onChange={(option) => handleEditFormChange('callStatus', option)}
               />
               {editErrors.callStatus && <p className="text-sm text-red-500 mt-1">{editErrors.callStatus}</p>}
             </div>
+
+            {/* Follow-up Section */}
+            <div>
+              <Label htmlFor="editFollowUpToggle">Follow-up Required</Label>
+              <div className="flex items-center">
+                <label className="inline-flex items-center cursor-pointer">
+                  <input
+                    type="checkbox"
+                    id="editFollowUpToggle"
+                    checked={editFormData.isFollowUp}
+                    onChange={(e) => handleEditFormChange('isFollowUp', e.target.checked)}
+                    className="sr-only"
+                  />
+                  <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
+                    editFormData.isFollowUp ? 'bg-brand-500' : 'bg-gray-200 dark:bg-gray-700'
+                  }`}>
+                    <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${
+                      editFormData.isFollowUp ? 'transform translate-x-5' : ''
+                    }`}></div>
+                  </div>
+                </label>
+              </div>
+              {editErrors.isFollowUp && <p className="text-sm text-red-500 mt-1">{editErrors.isFollowUp}</p>}
+            </div>
+
+            {/* Follow-up Date - Show when toggle is on */}
+            {editFormData.isFollowUp && (
+              <div>
+                <DatePicker
+                  id="edit-follow-up-date-picker"
+                  label="Follow-up Date *"
+                  placeholder="Select date"
+                  defaultDate={editFormData.followUpDate || undefined}
+                  onChange={(selectedDates) => {
+                    if (selectedDates && selectedDates.length > 0) {
+                      handleEditFormChange('followUpDate', selectedDates[0]);
+                    }
+                  }}
+                />
+                {editErrors.followUpDate && <p className="text-sm text-red-500 mt-1">{editErrors.followUpDate}</p>}
+              </div>
+            )}
           </div>
 
           {/* Notes - Full width */}

@@ -2,7 +2,7 @@
 import React, { useEffect, useState } from 'react';
 import { useRouter, useParams } from 'next/navigation';
 import api from '@/lib/api';
-import { formatApiDataForSelect } from '@/lib/utils';
+import { formatApiDataForSelect, parseDateString } from '@/lib/utils';
 import PageBreadcrumb from '@/components/common/PageBreadCrumb';
 import ComponentCard from '@/components/common/ComponentCard';
 import Button from '@/components/ui/button/Button';
@@ -40,14 +40,14 @@ export default function UpdateStaffPage() {
     firstName: '',
     lastName: '',
     gender: null as SelectOption | null,
-    dob: null as Date | null,
+    dob: null as Date | string | null,
     email: '',
     staffCode: '',
     position: '',
     department: null as SelectOption | null,
     employmentType: null as SelectOption | null,
     employmentLevel: null as SelectOption | null,
-    employmentStartDate: null as Date | null,
+    employmentStartDate: null as Date | string | null,
     address: {
       province: null,
       district: null,
@@ -137,6 +137,8 @@ export default function UpdateStaffPage() {
 
         // Use the staff record directly
         const staff = staffRecord;
+        console.log('Date of birth from API:', staff.date_of_birth);
+        console.log('Employment start date from API:', staff.employment_start_date);
         const allChannelTypes = formatApiDataForSelect(
           channelType.data,
           'channel_type_id',
@@ -150,10 +152,8 @@ export default function UpdateStaffPage() {
             value: String(staff.gender_id),
             label: staff.gender_name || 'Unknown',
           } : null,
-          dob: staff.date_of_birth
-            ? new Date(staff.date_of_birth)
-            : null,
-          email: staff.email || '',
+          dob: staff.date_of_birth,
+          email: '', // Email not available in API response, set as empty
           staffCode: staff.staff_code || '',
           position: staff.position || '',
           department: staff.department ? {
@@ -168,9 +168,7 @@ export default function UpdateStaffPage() {
             value: String(staff.employment_level),
             label: staff.employment_level,
           } : null,
-          employmentStartDate: staff.employment_start_date
-            ? new Date(staff.employment_start_date)
-            : null,
+          employmentStartDate: staff.employment_start_date,
           address: {
             province: staff.province_id
               ? {
@@ -197,7 +195,7 @@ export default function UpdateStaffPage() {
                 }
               : null,
             homeAddress: staff.current_address || '',
-            streetAddress: '',
+            streetAddress: staff.street_address || '', // Map from API if available
           },
           contact_data: (staff.contact_data || []).map(
             (channel: { channel_type_id: string; contact_values: { contact_number: string; is_primary: boolean; remark?: string }[] }) => ({
@@ -215,6 +213,9 @@ export default function UpdateStaffPage() {
           existingPhotoUrl: (Array.isArray(staff.photo_url) ? staff.photo_url[0] : staff.photo_url) || '',
           remark: staff.remark || '',
         });
+
+        console.log('Parsed DOB:', parseDateString(staff.date_of_birth));
+        console.log('Parsed Employment Start Date:', parseDateString(staff.employment_start_date));
 
         setDropdownOptions({
           gender: formatApiDataForSelect(gender.data, 'gender_id', 'gender_name'),
@@ -320,16 +321,17 @@ export default function UpdateStaffPage() {
         }
       }
 
-      // Group contact data by channel type
+      // Group contact data by channel type according to new API structure
       const contactDataGrouped = formData.contact_data.reduce(
-        (acc: { channel_type_id: string; contact_values: { contact_number: string; is_primary: boolean; remark: string }[] }[], channel: IContactChannel) => {
+        (acc: { channel_type_id: string; contact_values: { user_name: string; contact_number: string; remark: string; is_primary: boolean }[] }[], channel: IContactChannel) => {
           if (channel.channel_type && channel.contact_values.length > 0) {
             acc.push({
               channel_type_id: channel.channel_type.value,
               contact_values: channel.contact_values.map((val: { contact_number: string; is_primary: boolean; remark?: string }) => ({
+                user_name: `${formData.firstName}.${formData.lastName}`.toLowerCase().replace(/\s+/g, '.'),
                 contact_number: val.contact_number,
-                is_primary: val.is_primary,
                 remark: val.remark || '',
+                is_primary: val.is_primary,
               })),
             });
           }
@@ -345,21 +347,30 @@ export default function UpdateStaffPage() {
         last_name: formData.lastName,
         gender_id: formData.gender?.value,
         village_id: formData.address.village?.value,
+        manager_id: "1", // Default manager ID as shown in the sample
         date_of_birth: formatDateForAPI(formData.dob),
-        email: formData.email,
         position: formData.position,
-        department: formData.department?.label,
-        employment_type: formData.employmentType?.value,
-        employment_level: formData.employmentLevel?.value,
+        department: formData.department?.label || null,
+        employment_type: formData.employmentType?.label || null,
         employment_start_date: formatDateForAPI(formData.employmentStartDate),
-        current_address: formData.address.homeAddress,
-        remark: formData.remark,
+        employment_end_date: null,
+        employment_level: formData.employmentLevel?.label || null,
+        current_address: formData.address.homeAddress || null,
+        email: formData.email || null,
+        street_address: formData.address.streetAddress || null,
         photo_url: photoUrl ? [photoUrl] : [],
-        contact_data: contactDataGrouped,
         is_active: true,
+        menu_id: "MU_05", // Default menu ID as shown in the sample
+        contact_data: contactDataGrouped,
       };
 
-      const updateStaff = await api.put(`/staff/update/${staffId}`, staffPayload);
+      console.log('Staff payload before API call:', JSON.stringify(staffPayload, null, 2));
+      console.log('Date of birth:', formData.dob, '-> formatted:', formatDateForAPI(formData.dob));
+      console.log('Employment start date:', formData.employmentStartDate, '-> formatted:', formatDateForAPI(formData.employmentStartDate));
+      console.log('Email:', formData.email);
+      console.log('Street address:', formData.address.streetAddress);
+
+      const updateStaff = await api.put('/staff/update', staffPayload);
       if (updateStaff.data) {
         setAlertInfo({
           variant: 'success',

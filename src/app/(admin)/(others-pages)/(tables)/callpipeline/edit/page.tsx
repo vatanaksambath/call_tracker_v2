@@ -1,13 +1,17 @@
 "use client";
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
 import Button from "@/components/ui/button/Button";
 import Label from "@/components/form/Label";
+import Input from "@/components/form/input/InputField";
 import TextArea from "@/components/form/input/TextArea";
+import PhoneInput from "@/components/form/input/PhoneInput";
 import { Modal } from "@/components/ui/modal";
 import SelectionModal from "@/components/common/SelectionModal";
+import PaginatedSelectionModal from "@/components/common/PaginatedSelectionModal";
+import { getUserFromToken } from "@/lib/api";
 
 // Call Pipeline Edit Form Component
 export default function CallPipelineEditForm() {
@@ -32,6 +36,44 @@ export default function CallPipelineEditForm() {
     project_name: string;
     price: string;
     original: Record<string, unknown>;
+  };
+
+  // Phone number formatting function
+  const formatPhoneNumber = (phoneNumber: string): string => {
+    if (!phoneNumber) return "(No Contact)";
+    
+    // Remove all non-digit characters
+    const digits = phoneNumber.replace(/\D/g, "");
+    
+    // Only format if length is >= 9 digits
+    if (digits.length >= 9) {
+      // Handle different phone number formats
+      if (digits.startsWith("855")) {
+        // Already has country code
+        const remaining = digits.slice(3);
+        if (remaining.length >= 6) {
+          return `(+855) ${remaining.slice(0, 3)}-${remaining.slice(3, 6)}-${remaining.slice(6)}`;
+        }
+      } else {
+        // Assume it's a local number, add Cambodia country code
+        return `(+855) ${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+      }
+    }
+    
+    // If length < 9 or formatting fails, return original
+    return phoneNumber;
+  };
+
+  // Price formatting function
+  const formatPrice = (price: string | number): string => {
+    if (!price) return "Price not available";
+    
+    // Convert to number and format with commas
+    const numPrice = typeof price === 'string' ? parseFloat(price.replace(/[^0-9.]/g, '')) : price;
+    
+    if (isNaN(numPrice)) return "Price not available";
+    
+    return `$${numPrice.toLocaleString('en-US')}`;
   };
 
   const router = useRouter();
@@ -68,6 +110,17 @@ export default function CallPipelineEditForm() {
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [showCreateLeadModal, setShowCreateLeadModal] = useState(false);
+  const [showLeadSuccessModal, setShowLeadSuccessModal] = useState(false);
+
+  // New Lead Creation States
+  const [newLeadData, setNewLeadData] = useState({
+    name: "",
+    phoneNumber: "",
+  });
+  const [newLeadErrors, setNewLeadErrors] = useState<{ [key: string]: string }>({});
+  const [isCreatingLead, setIsCreatingLead] = useState(false);
+  const [createdLeadInfo, setCreatedLeadInfo] = useState<{ name: string; phone: string } | null>(null);
 
   // Data arrays for selection modals
   const [mappedLeads, setMappedLeads] = useState<MappedLead[]>([]);
@@ -78,6 +131,13 @@ export default function CallPipelineEditForm() {
   const [isLeadLoading, setIsLeadLoading] = useState(false);
   const [isStaffLoading, setIsStaffLoading] = useState(false);
   const [isPropertyLoading, setIsPropertyLoading] = useState(false);
+
+  // Lead pagination states
+  const [leadCurrentPage, setLeadCurrentPage] = useState(1);
+  const [leadTotalRows, setLeadTotalRows] = useState(0);
+  const [leadSearchQuery, setLeadSearchQuery] = useState("");
+  const [leadSearchType, setLeadSearchType] = useState("");
+  const leadPageSize = 10;
 
   // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -175,19 +235,229 @@ export default function CallPipelineEditForm() {
     router.push("/callpipeline");
   };
 
+  // --- New Lead Creation Handlers ---
+  const handleNewLeadChange = (field: keyof typeof newLeadData, value: string) => {
+    setNewLeadData((prev) => ({ ...prev, [field]: value }));
+    if (newLeadErrors[field]) {
+      setNewLeadErrors((prevErrors) => {
+        const newErrors = { ...prevErrors };
+        delete newErrors[field];
+        return newErrors;
+      });
+    }
+  };
+
+  const validateNewLead = () => {
+    const errors: { [key: string]: string } = {};
+    
+    if (!newLeadData.name.trim()) {
+      errors.name = "Name is required.";
+    }
+    
+    if (!newLeadData.phoneNumber.trim()) {
+      errors.phoneNumber = "Phone number is required.";
+    }
+    
+    setNewLeadErrors(errors);
+    return Object.keys(errors).length === 0;
+  };
+
+  const handleCreateNewLead = async () => {
+    if (!validateNewLead()) return;
+
+    setIsCreatingLead(true);
+    console.log("Form data:", newLeadData);
+
+    try {
+      // Get logged-in user information
+      const currentUser = getUserFromToken();
+      console.log("Current user from token:", currentUser);
+      
+      if (!currentUser?.user_id) {
+        throw new Error("Unable to get current user information. Please log in again.");
+      }
+      
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      let baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+      baseUrl = baseUrl.replace(/\/+$/, "");
+      
+      console.log("API Base URL:", baseUrl);
+      console.log("Token available:", !!token);
+      console.log("User ID:", currentUser.user_id);
+
+      // Split name into first and last name
+      const nameParts = newLeadData.name.trim().split(" ");
+      const firstName = nameParts[0] || "";
+      let lastName = nameParts.slice(1).join(" ") || "";
+      
+      // If no last name provided, use a space to ensure we have both first and last name
+      if (!lastName) {
+        lastName = " ";
+        console.log("No last name provided, using space");
+      }
+      
+      console.log("Name parts:", { firstName, lastName });
+      
+      // Create payload with minimal required data and placeholders
+      const leadPayload = {
+        first_name: firstName,
+        last_name: lastName,
+        gender_id: "1", // Default to Male
+        customer_type_id: "1", // Default customer type
+        lead_source_id: "1", // Default lead source
+        village_id: "999999", // Placeholder village ID that exists in DB
+        business_id: "1", // Default business
+        initial_staff_id: String(currentUser.user_id), // Current logged-in user ID as string
+        current_staff_id: String(currentUser.user_id), // Current logged-in user ID as string
+        date_of_birth: "1990-01-01", // Default DOB
+        email: `${firstName.toLowerCase()}@placeholder.com`, // Placeholder email
+        occupation: "N/A", // Placeholder occupation
+        home_address: "N/A", // Placeholder address
+        street_address: "N/A", // Placeholder address
+        biz_description: null,
+        relationship_date: new Date().toISOString().split('T')[0], // Today's date
+        remark: "Created from Call Pipeline - Quick Creation",
+        photo_url: null,
+        contact_data: [
+          {
+            channel_type_id: "2", // Updated to 2 as requested
+            contact_values: [
+              {
+                user_name: `${firstName} ${lastName}`.trim(), // Use full name as requested
+                contact_number: newLeadData.phoneNumber,
+                remark: "Primary contact",
+                is_primary: true,
+              }
+            ]
+          }
+        ],
+      };
+
+      console.log("Lead payload:", JSON.stringify(leadPayload, null, 2));
+
+      const response = await fetch(`${baseUrl}/lead/create`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(leadPayload),
+      });
+
+      console.log("Response status:", response.status);
+      console.log("Response ok:", response.ok);
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error("Response error text:", errorText);
+        throw new Error(`Failed to create lead: ${response.status} ${response.statusText}`);
+      }
+
+      const responseData = await response.json();
+      console.log("✅ Lead created successfully:", responseData);
+      
+      setCreatedLeadInfo({ name: newLeadData.name, phone: newLeadData.phoneNumber });
+      setNewLeadData({ name: "", phoneNumber: "" });
+      setNewLeadErrors({});
+      setShowCreateLeadModal(false);
+      setShowLeadSuccessModal(true);
+    } catch (error) {
+      console.error("❌ Lead creation error:", error);
+      setNewLeadErrors({ name: error instanceof Error ? error.message : "Failed to create lead" });
+    } finally {
+      setIsCreatingLead(false);
+    }
+  };
+
+  const handleLeadSuccessModalClose = () => {
+    setShowLeadSuccessModal(false);
+    setCreatedLeadInfo(null);
+    // Refresh the lead list
+    fetchLeads();
+  };
+
+  // --- Lead Pagination Handlers ---
+  const handleLeadPageChange = (page: number) => {
+    setLeadCurrentPage(page);
+    fetchLeads(page, leadSearchQuery, leadSearchType);
+  };
+
+  const handleLeadSearch = (query: string, searchType: string) => {
+    setLeadSearchQuery(query);
+    setLeadSearchType(searchType);
+    setLeadCurrentPage(1);
+    fetchLeads(1, query, searchType);
+  };
+
   // --- Fetch Functions for Modals ---
-  const fetchLeads = async () => {
+  const fetchPropertyDetails = useCallback(async (propertyProfileId: string): Promise<MappedProperty | null> => {
+    try {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+      let baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+      baseUrl = baseUrl.replace(/\/+$/, "");
+      const endpoint = `${baseUrl}/property-profile/pagination`;
+      const body = {
+        page_number: "1",
+        page_size: "10",
+        search_type: "property_profile_id",
+        query_search: propertyProfileId,
+      };
+      console.log("Property Details API endpoint:", endpoint);
+      console.log("Property Details API request body:", body);
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) throw new Error("Failed to fetch property details");
+      const data = await res.json();
+      console.log("Property Details API response:", data);
+      let propertyArr: unknown[] = [];
+      if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
+        propertyArr = data[0].data;
+      } else if (Array.isArray(data?.data)) {
+        propertyArr = data.data;
+      } else if (Array.isArray(data?.results)) {
+        propertyArr = data.results;
+      }
+      
+      if (propertyArr.length > 0) {
+        const propertyData = propertyArr[0] as Record<string, unknown>;
+        return {
+          property_profile_id: String(propertyData.property_profile_id || ""),
+          property_profile_name: String(propertyData.property_profile_name || propertyData.property_name || "(No Property Name)"),
+          property_type_name: String(propertyData.property_type_name || ""),
+          project_name: String(propertyData.project_name || ""),
+          price: String(propertyData.price || ""),
+          original: propertyData,
+        };
+      }
+      return null;
+    } catch (err) {
+      console.error("Property Details API error:", err);
+      return null;
+    }
+  }, []);
+
+  const fetchLeads = async (page?: number, search?: string, searchType?: string) => {
     setIsLeadLoading(true);
     try {
+      const currentPage = page || leadCurrentPage;
+      const currentSearch = search !== undefined ? search : leadSearchQuery;
+      const currentSearchType = searchType !== undefined ? searchType : leadSearchType;
+      
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       let baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
       baseUrl = baseUrl.replace(/\/+$/, "");
       const endpoint = `${baseUrl}/lead/pagination`;
       const body = {
-        page_number: "1",
-        page_size: "10",
-        search_type: "",
-        query_search: "",
+        page_number: String(currentPage),
+        page_size: String(leadPageSize),
+        search_type: currentSearchType,
+        query_search: currentSearch,
       };
       console.log("Lead API endpoint:", endpoint);
       console.log("Lead API request body:", body);
@@ -203,12 +473,17 @@ export default function CallPipelineEditForm() {
       const data = await res.json();
       console.log("Lead API response:", data);
       let leadsArr: unknown[] = [];
+      let totalRows = 0;
+      
       if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
         leadsArr = data[0].data;
+        totalRows = data[0].total_row || 0;
       } else if (Array.isArray(data?.data)) {
         leadsArr = data.data;
+        totalRows = data.total_row || 0;
       } else if (Array.isArray(data?.results)) {
         leadsArr = data.results;
+        totalRows = data.total_row || 0;
       }
       
       // Map to MappedLead format for edit page
@@ -220,9 +495,13 @@ export default function CallPipelineEditForm() {
           const allContacts = leadData.contact_data.flatMap((cd: Record<string, unknown>) => Array.isArray(cd.contact_values) ? cd.contact_values : []);
           const primary = allContacts.find((v: Record<string, unknown>) => v.is_primary && v.contact_number);
           if (primary) {
-            primaryContact = String(primary.contact_number);
+            const rawNumber = String(primary.contact_number);
+            // Format phone number to (+855) 000-000-0000
+            primaryContact = formatPhoneNumber(rawNumber);
           } else if (allContacts.length > 0) {
-            primaryContact = String(allContacts[0].contact_number || "");
+            const rawNumber = String(allContacts[0].contact_number || "");
+            // Format phone number to (+855) 000-000-0000
+            primaryContact = formatPhoneNumber(rawNumber);
           }
         }
         return {
@@ -233,9 +512,11 @@ export default function CallPipelineEditForm() {
         };
       });
       setMappedLeads(mapped);
+      setLeadTotalRows(totalRows);
     } catch (err) {
       console.error("Lead API error:", err);
       setMappedLeads([]);
+      setLeadTotalRows(0);
     } finally {
       setIsLeadLoading(false);
     }
@@ -358,7 +639,6 @@ export default function CallPipelineEditForm() {
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get('id') || "";
     console.log("Extracted call log ID from URL query:", id);
-    console.log("Full URL:", window.location.href);
     setCallLogId(id);
   }, []);
 
@@ -459,15 +739,35 @@ export default function CallPipelineEditForm() {
             property_profile_name: log.property_profile_name,
           });
           
-          const mappedProperty: MappedProperty = {
-            property_profile_id: String(log.property_profile_id || ""),
-            property_profile_name: log.property_profile_name || "(No Property Name)",
-            property_type_name: "", // Not available in this response
-            project_name: "", // Not available in this response  
-            price: "", // Not available in this response
-            original: log,
-          };
-          console.log("Mapped property:", mappedProperty);
+          // Fetch complete property details if we have a property_profile_id
+          let mappedProperty: MappedProperty;
+          if (log.property_profile_id) {
+            const completeProperty = await fetchPropertyDetails(String(log.property_profile_id));
+            if (completeProperty) {
+              mappedProperty = completeProperty;
+              console.log("Fetched complete property details:", mappedProperty);
+            } else {
+              // Fallback to basic property info
+              mappedProperty = {
+                property_profile_id: String(log.property_profile_id || ""),
+                property_profile_name: log.property_profile_name || "(No Property Name)",
+                property_type_name: "", // Not available in this response
+                project_name: "", // Not available in this response  
+                price: "", // Not available in this response
+                original: log,
+              };
+            }
+          } else {
+            mappedProperty = {
+              property_profile_id: "",
+              property_profile_name: "(No Property Name)",
+              property_type_name: "",
+              project_name: "",
+              price: "",
+              original: log,
+            };
+          }
+          console.log("Final mapped property:", mappedProperty);
           
           setFormData({
             selectedLead: mappedLead,
@@ -489,7 +789,7 @@ export default function CallPipelineEditForm() {
       setIsInitialLoading(false);
     };
     fetchCallLogData();
-  }, [callLogId]);
+  }, [callLogId, fetchPropertyDetails]);
 
   if (isInitialLoading) {
     return (
@@ -517,19 +817,30 @@ export default function CallPipelineEditForm() {
                         {formData.selectedLead.lead_name}
                       </div>
                       <div className="text-sm text-gray-500 dark:text-gray-400">
-                        {formData.selectedLead.primary_contact}
+                        {formatPhoneNumber(formData.selectedLead.primary_contact)}
                       </div>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setShowLeadModal(true);
-                        fetchLeads();
-                      }}
-                    >
-                      Change
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          router.push(`/lead/edit?id=${formData.selectedLead?.lead_id}`);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setShowLeadModal(true);
+                          fetchLeads();
+                        }}
+                      >
+                        Change
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <Button
@@ -563,16 +874,27 @@ export default function CallPipelineEditForm() {
                         {formData.selectedStaff.position}
                       </div>
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setShowStaffModal(true);
-                        fetchStaff();
-                      }}
-                    >
-                      Change
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          router.push(`/staff/edit?id=${formData.selectedStaff?.staff_id}`);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setShowStaffModal(true);
+                          fetchStaff();
+                        }}
+                      >
+                        Change
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <Button
@@ -605,24 +927,38 @@ export default function CallPipelineEditForm() {
                       <div className="text-sm text-gray-500 dark:text-gray-400">
                         ID: {formData.selectedProperty.property_profile_id}
                       </div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        {formData.selectedProperty.property_type_name} •{" "}
-                        {formData.selectedProperty.project_name}
-                      </div>
-                      <div className="text-sm text-gray-500 dark:text-gray-400">
-                        Price: {formData.selectedProperty.price}
-                      </div>
+                      {formData.selectedProperty.property_type_name && formData.selectedProperty.project_name && (
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                          {formData.selectedProperty.property_type_name} • {formData.selectedProperty.project_name}
+                        </div>
+                      )}
+                      {formData.selectedProperty.price && (
+                        <div className="text-sm text-gray-500 dark:text-gray-400">
+                          Price: {formatPrice(formData.selectedProperty.price)}
+                        </div>
+                      )}
                     </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        setShowPropertyModal(true);
-                        fetchProperties();
-                      }}
-                    >
-                      Change
-                    </Button>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          router.push(`/property/edit?id=${formData.selectedProperty?.property_profile_id}`);
+                        }}
+                      >
+                        Edit
+                      </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => {
+                          setShowPropertyModal(true);
+                          fetchProperties();
+                        }}
+                      >
+                        Change
+                      </Button>
+                    </div>
                   </div>
                 ) : (
                   <Button
@@ -678,7 +1014,7 @@ export default function CallPipelineEditForm() {
       </div>
 
       {/* Selection Modals */}
-      <SelectionModal
+      <PaginatedSelectionModal
         isOpen={showLeadModal}
         onClose={() => setShowLeadModal(false)}
         onSelect={(lead) => handleChange("selectedLead", lead)}
@@ -691,6 +1027,23 @@ export default function CallPipelineEditForm() {
         ]}
         searchPlaceholder="Search leads..."
         isLoading={isLeadLoading}
+        currentPage={leadCurrentPage}
+        totalRows={leadTotalRows}
+        pageSize={leadPageSize}
+        onPageChange={handleLeadPageChange}
+        onSearch={handleLeadSearch}
+        searchQuery={leadSearchQuery}
+        searchType={leadSearchType}
+        extraActions={
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => setShowCreateLeadModal(true)}
+            className="ml-3"
+          >
+            + Create New Lead
+          </Button>
+        }
       />
 
       <SelectionModal
@@ -756,22 +1109,156 @@ export default function CallPipelineEditForm() {
             Your call pipeline changes have been saved. What would you like to do next?
           </p>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
+              <Button
+                variant="outline"
+                onClick={handleCreateAnother}
+                className="flex-1"
+              >
+                Edit Another Pipeline
+              </Button>
+              <Button
+                variant="primary"
+                onClick={handleGoToPipeline}
+                className="flex-1"
+              >
+                Go to Call Pipeline
+              </Button>
+            </div>
+            
+            {/* Loan Payment Schedule Button */}
+            <div className="border-t pt-3 mt-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const propertyPrice = formData.selectedProperty?.price || 0;
+                  const params = new URLSearchParams({
+                    propertyPrice: String(propertyPrice),
+                    callPipelineId: callLogId || 'edit'
+                  });
+                  router.push(`/callpipeline/payment_schedule?${params.toString()}`);
+                }}
+                className="w-full bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30"
+              >
+                📊 Generate Loan Payment Schedule
+              </Button>
+              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">
+                Calculate payment schedule based on selected property price
+              </p>
+            </div>
+          </div>
+        </div>
+      </Modal>
+
+      {/* Create New Lead Modal */}
+      <Modal
+        isOpen={showCreateLeadModal}
+        onClose={() => setShowCreateLeadModal(false)}
+        className="max-w-md"
+      >
+        <div className="p-6">
+          <h3 className="mb-4 text-lg font-semibold text-gray-800 dark:text-white">
+            Create New Lead
+          </h3>
+
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="lead-name">Full Name *</Label>
+              <Input
+                id="lead-name"
+                value={newLeadData.name}
+                onChange={(e) => handleNewLeadChange("name", e.target.value)}
+                placeholder="Enter full name"
+                className={newLeadErrors.name ? "border-red-500" : ""}
+              />
+              {newLeadErrors.name && (
+                <p className="mt-1 text-sm text-red-500">{newLeadErrors.name}</p>
+              )}
+            </div>
+
+            <div>
+              <Label htmlFor="lead-phone">Phone Number *</Label>
+              <PhoneInput
+                id="lead-phone"
+                value={newLeadData.phoneNumber}
+                onChange={(value) => handleNewLeadChange("phoneNumber", value)}
+                placeholder="000-000-0000"
+              />
+              {newLeadErrors.phoneNumber && (
+                <p className="mt-1 text-sm text-red-500">{newLeadErrors.phoneNumber}</p>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end gap-3 mt-6">
             <Button
               variant="outline"
-              onClick={handleCreateAnother}
-              className="flex-1"
+              onClick={() => setShowCreateLeadModal(false)}
+              disabled={isCreatingLead}
             >
-              Edit Another Pipeline
+              Cancel
             </Button>
             <Button
               variant="primary"
-              onClick={handleGoToPipeline}
-              className="flex-1"
+              onClick={handleCreateNewLead}
+              disabled={isCreatingLead}
             >
-              Go to Call Pipeline
+              {isCreatingLead ? "Creating..." : "Create Lead"}
             </Button>
           </div>
+        </div>
+      </Modal>
+
+      {/* Lead Success Modal */}
+      <Modal
+        isOpen={showLeadSuccessModal}
+        onClose={handleLeadSuccessModalClose}
+        className="max-w-md"
+      >
+        <div className="p-6 text-center">
+          <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-green-100 rounded-full dark:bg-green-900/20">
+            <svg
+              className="w-6 h-6 text-green-600 dark:text-green-400"
+              fill="none"
+              stroke="currentColor"
+              viewBox="0 0 24 24"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeWidth={2}
+                d="M5 13l4 4L19 7"
+              />
+            </svg>
+          </div>
+
+          <h3 className="mb-2 text-lg font-semibold text-gray-800 dark:text-white">
+            Lead Created Successfully!
+          </h3>
+
+          {createdLeadInfo && (
+            <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-800 rounded-lg">
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                <strong>Name:</strong> {createdLeadInfo.name}
+              </p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">
+                <strong>Phone:</strong> {createdLeadInfo.phone}
+              </p>
+            </div>
+          )}
+
+          <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
+            The new lead has been added to your system and is now available for selection.
+          </p>
+
+          <Button
+            variant="primary"
+            onClick={handleLeadSuccessModalClose}
+            className="w-full"
+          >
+            Continue
+          </Button>
         </div>
       </Modal>
     </div>

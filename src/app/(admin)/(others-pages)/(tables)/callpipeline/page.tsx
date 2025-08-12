@@ -4,7 +4,7 @@ import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 
 import React, { useEffect, useState } from "react";
 import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
-import CallLogsTable, { ColumnSelector } from "@/components/tables/CallLogsTable";
+import CallLogsTable, { ColumnSelector, defaultVisibleColumns } from "@/components/tables/CallLogsTable";
 import { CallLog } from "@/components/tables/sample-data/callLogsData";
 import api from "@/lib/api";
 import { 
@@ -16,48 +16,43 @@ import {
 } from "@heroicons/react/24/outline";
 import Link from "next/link";
 import Button from "@/components/ui/button/Button";
-import Pagination from "@/components/tables/Pagination";
 
 const breadcrumbs = [
     { name: "Home", href: "/" },
     { name: "Call Pipeline", href: "/callpipeline" }
   ];
 
-
 export default function CallPipelinePage() {
   const [callLogs, setCallLogs] = useState<CallLog[]>([]);
-  // Default columns as specified by user
-  const defaultColumns: (keyof CallLog)[] = [
-    'call_log_id',
-    'lead_id',
-    'lead_name',
-    'property_profile_name',
-    'total_call',
-    'total_site_visit',
-    'status_id',
-    'is_follow_up',
-    'follow_up_date',
-  ];
   
   // Load visible columns from localStorage or use default
   const getInitialVisibleColumns = (): (keyof CallLog)[] => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('callPipelineVisibleColumns');
+      const version = localStorage.getItem('callPipelineColumnsVersion');
+      const currentVersion = '2.0'; // Update this version to force reset for all users
+      
+      // If version doesn't match, reset to default columns
+      if (version !== currentVersion) {
+        localStorage.setItem('callPipelineColumnsVersion', currentVersion);
+        localStorage.setItem('callPipelineVisibleColumns', JSON.stringify(defaultVisibleColumns));
+        return defaultVisibleColumns;
+      }
+      
       if (saved) {
         try {
           return JSON.parse(saved);
         } catch {
-          return defaultColumns;
+          return defaultVisibleColumns;
         }
       }
     }
-    return defaultColumns;
+    return defaultVisibleColumns;
   };
 
   const [visibleColumns, setVisibleColumns] = useState<(keyof CallLog)[]>(getInitialVisibleColumns);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const [totalRows, setTotalRows] = useState(0);
   const [stats, setStats] = useState({ totalCalls: 0, hotLeads: 0, followUpRequired: 0, siteVisits: 0, closedWon: 0 });
   const [isLoading, setIsLoading] = useState(true);
@@ -96,8 +91,13 @@ export default function CallPipelinePage() {
         const logs: CallLog[] = apiResult && apiResult.data ? apiResult.data : [];
         if (isMounted) {
           setCallLogs(logs);
-          setTotalPages(apiResult && apiResult.total_page ? apiResult.total_page : 1);
           setTotalRows(apiResult && apiResult.total_row ? apiResult.total_row : logs.length);
+          console.log('[CallPipeline] Pagination data:', { 
+            totalRows: apiResult && apiResult.total_row ? apiResult.total_row : logs.length,
+            logsLength: logs.length,
+            currentPage,
+            itemsPerPage 
+          });
         }
         // Summary cards
         const summaryResult = Array.isArray(summaryRes.data) ? summaryRes.data[0] : summaryRes.data;
@@ -114,7 +114,7 @@ export default function CallPipelinePage() {
       } catch {
         if (isMounted) {
           setCallLogs([]);
-          setTotalPages(1);
+          setTotalRows(0);
           setStats({ totalCalls: 0, hotLeads: 0, followUpRequired: 0, siteVisits: 0, closedWon: 0 });
         }
       } finally {
@@ -124,6 +124,9 @@ export default function CallPipelinePage() {
     fetchData();
     return () => { isMounted = false; };
   }, [currentPage, searchTerm]);
+
+  // Calculate total pages based on totalRows and itemsPerPage
+  const totalPages = Math.ceil(totalRows / itemsPerPage);
 
   if (isLoading) {
     return <LoadingOverlay isLoading={true} />;
@@ -191,7 +194,7 @@ export default function CallPipelinePage() {
         </div>
       </div>
       <div className="space-y-6">
-        <ComponentCard title="Call Pipeline">
+        <ComponentCard title="Call Pipeline Management">
           {/* Header: Add, Search, Column Selector */}
           <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between mb-4">
             <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -228,6 +231,26 @@ export default function CallPipelinePage() {
               </div>
             </div>
             <div className="flex items-center gap-2">
+              <Link href="/callpipeline/export">
+                <Button 
+                  variant="outline" 
+                  size="sm" 
+                  className="flex items-center gap-2"
+                >
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+                  </svg>
+                  Export
+                </Button>
+              </Link>
+              <Link href="/callpipeline/import_data">
+                <Button variant="outline" size="sm" className="flex items-center gap-2">
+                  <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M9 19l3 3m0 0l3-3m-3 3V10" />
+                  </svg>
+                  Import
+                </Button>
+              </Link>
               <ColumnSelector visibleColumns={visibleColumns} setVisibleColumns={setVisibleColumns} />
             </div>
           </div>
@@ -236,24 +259,55 @@ export default function CallPipelinePage() {
             visibleColumns={visibleColumns}
             setVisibleColumns={setVisibleColumns}
           />
+          
+          {/* Pagination */}
+          {totalRows > 0 && (
+            <div className="flex items-center justify-between">
+              <div className="text-sm text-gray-600 dark:text-gray-400">
+                Showing {(currentPage - 1) * itemsPerPage + 1} to {Math.min(currentPage * itemsPerPage, totalRows)} of {totalRows} call logs
+              </div>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                  className="flex items-center gap-1"
+                >
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                  </svg>
+                  
+                </Button>
+                <div className="flex items-center gap-1">
+                  {totalPages > 0 && Array.from({ length: totalPages }, (_, i) => i + 1).map((page) => (
+                    <Button
+                      key={page}
+                      variant={currentPage === page ? "primary" : "outline"}
+                      size="sm"
+                      onClick={() => setCurrentPage(page)}
+                      className="w-10 h-10"
+                    >
+                      {page}
+                    </Button>
+                  ))}
+                </div>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                  className="flex items-center gap-1"
+                >
+                  
+                  <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                  </svg>
+                </Button>
+              </div>
+            </div>
+          )}
         </ComponentCard>
-      {/* Pagination - Outside the ComponentCard like in developer page */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-4 py-3">
-          <div className="flex items-center">
-            <span className="text-sm text-gray-700 dark:text-gray-300">
-              Showing{" "}
-              <span className="font-medium">{((currentPage - 1) * itemsPerPage) + 1}</span>
-              {" "}to{" "}
-              <span className="font-medium">{Math.min(currentPage * itemsPerPage, totalRows)}</span>
-              {" "}of{" "}
-              <span className="font-medium">{totalRows}</span>
-              {" "}results
-            </span>
-          </div>
-          <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
-        </div>
-      )}
       </div>
     </div>
   );

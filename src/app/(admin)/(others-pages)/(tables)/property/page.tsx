@@ -3,6 +3,7 @@ import ComponentCard from "@/components/common/ComponentCard";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import PropertyTable from "@/components/tables/PropertyTable";
 import { PropertyColumnSelector } from "@/components/tables/PropertyColumnSelector";
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 import React, { useState, useEffect } from "react";
 import Button from "@/components/ui/button/Button";
 import Link from "next/link";
@@ -21,12 +22,38 @@ const breadcrumbs = [
 
 export default function PropertyPage() {
   const [searchTerm, setSearchTerm] = useState("");
+  const [isStatsLoading, setIsStatsLoading] = useState(true);
+  const defaultColumns = ['id', 'name', 'address', 'project', 'type', 'status', 'room', 'home', 'width', 'length', 'price'];
   const [visibleColumns, setVisibleColumns] = useState<(keyof import("@/components/tables/PropertyTable").Property)[]>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('propertyTableVisibleColumns');
-      return saved ? JSON.parse(saved) : ['id', 'name', 'address', 'project', 'type', 'room', 'home', 'width', 'length', 'price', 'is_active'];
+      if (saved) {
+        try {
+          const savedColumns = JSON.parse(saved);
+          // Remove 'is_active' and 'created_by' if they exist in saved columns and update localStorage
+          const updatedColumns = savedColumns.filter((col: string) => col !== 'is_active' && col !== 'created_by');
+          if (updatedColumns.length === 0) {
+            // If no columns left after filtering, use default
+            localStorage.setItem('propertyTableVisibleColumns', JSON.stringify(defaultColumns));
+            return defaultColumns;
+          }
+          if (updatedColumns.length !== savedColumns.length) {
+            // Columns were removed, update localStorage
+            localStorage.setItem('propertyTableVisibleColumns', JSON.stringify(updatedColumns));
+            return updatedColumns;
+          }
+          return savedColumns;
+        } catch {
+          // If parsing fails, use default
+          localStorage.setItem('propertyTableVisibleColumns', JSON.stringify(defaultColumns));
+          return defaultColumns;
+        }
+      }
+      // No saved columns, set default
+      localStorage.setItem('propertyTableVisibleColumns', JSON.stringify(defaultColumns));
+      return defaultColumns;
     }
-    return ['id', 'name', 'address', 'project', 'type', 'room', 'home', 'width', 'length', 'price', 'is_active'];
+    return defaultColumns;
   });
 
   // Real total properties from API
@@ -41,6 +68,9 @@ export default function PropertyPage() {
 
   // Fetch property statistics from summary API
   useEffect(() => {
+    let isMounted = true;
+    setIsStatsLoading(true);
+    
     async function fetchStats() {
       try {
         const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
@@ -56,17 +86,30 @@ export default function PropertyPage() {
         const data = await response.json();
         console.log("Property summary API response", data);
         const apiResult = data[0]?.data?.[0];
-        setTotalProperties(apiResult?.total_property_profile || 0);
-        setAvailableProperties(apiResult?.active_property_profile || 0);
-        setTotalValuation(apiResult?.total_property_profile_price || 0);
+        
+        if (isMounted) {
+          setTotalProperties(apiResult?.total_property_profile || 0);
+          setAvailableProperties(apiResult?.active_property_profile || 0);
+          setTotalValuation(apiResult?.total_property_profile_price || 0);
+        }
       } catch {
-        setTotalProperties(0);
-        setAvailableProperties(0);
-        setTotalValuation(0);
+        if (isMounted) {
+          setTotalProperties(0);
+          setAvailableProperties(0);
+          setTotalValuation(0);
+        }
+      } finally {
+        if (isMounted) setIsStatsLoading(false);
       }
     }
+    
     fetchStats();
+    return () => { isMounted = false; };
   }, []);
+
+  if (isStatsLoading) {
+    return <LoadingOverlay isLoading={true} />;
+  }
 
   return (
     <div className="space-y-6">
@@ -74,38 +117,38 @@ export default function PropertyPage() {
       
       {/* Property Statistics Cards */}
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-6">
+        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Properties</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalProperties}</p>
             </div>
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/10">
-              <HomeIcon className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/10">
+              <HomeIcon className="h-5 w-5 text-blue-600 dark:text-blue-400" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-6">
+        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Available Properties</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">{availableProperties}</p>
             </div>
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-50 dark:bg-green-500/10">
-              <CheckCircleIcon className="h-6 w-6 text-green-600 dark:text-green-400" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-green-50 dark:bg-green-500/10">
+              <CheckCircleIcon className="h-5 w-5 text-green-600 dark:text-green-400" />
             </div>
           </div>
         </div>
 
-        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-6">
+        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-4">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Property Valuation</p>
               <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalValuation.toLocaleString()}</p>
             </div>
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-purple-50 dark:bg-purple-500/10">
-              <CurrencyDollarIcon className="h-6 w-6 text-purple-600 dark:text-purple-400" />
+            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-50 dark:bg-purple-500/10">
+              <CurrencyDollarIcon className="h-5 w-5 text-purple-600 dark:text-purple-400" />
             </div>
           </div>
         </div>

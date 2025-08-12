@@ -67,12 +67,18 @@ const CreatePropertyTypePage: React.FC = () => {
       const user = getUserFromToken();
       const propertyTypeData = {
         property_type_name: formData.propertyTypeName,
-        property_type_description: formData.description,
-        is_active: true,
-        created_by: user?.user_name || 'System',
+        property_type_description: formData.description
       };
 
+      console.log("Property Type API Request:");
+      console.log("Endpoint: /property-type/create");
+      console.log("Request Body:", propertyTypeData);
+      console.log("Request Body (JSON):", JSON.stringify(propertyTypeData, null, 2));
+
       const response = await api.post('/property-type/create', propertyTypeData);
+      
+      console.log("Property Type API Response:", response.data);
+      
       if (response.data) {
         setAlertInfo({
           variant: 'success',

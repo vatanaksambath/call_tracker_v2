@@ -235,29 +235,57 @@ export default function CreateLeadPage() {
             lead_source_id: formData.leadSource?.value,
             village_id: formData.address.village?.value,
             business_id: formData.business?.value,
-            initial_staff_id: tokenUser?.user_id, 
-            current_staff_id: tokenUser?.user_id,
+            initial_staff_id: String(Number(tokenUser?.user_id) || 1), // Convert to number then to string
+            current_staff_id: String(Number(tokenUser?.user_id) || 1), // Convert to number then to string
             date_of_birth: formatDateForAPI(formData.dob),
-            email: formData.email,
-            occupation: formData.occupation,
-            home_address: formData.address.homeAddress,
-            street_address: formData.address.streetAddress,
+            email: formData.email || null,
+            occupation: formData.occupation || null,
+            home_address: formData.address.homeAddress || null,
+            street_address: formData.address.streetAddress || null,
             biz_description: null,
             relationship_date: formatDateForAPI(formData.contactDate),
-            remark: formData.remark,
+            remark: formData.remark || null,
             photo_url: photoUrl,
             contact_data: contactDataGrouped,
         };
 
+        console.log('Lead payload before API call:', JSON.stringify(leadPayload, null, 2));
+        console.log('Initial staff ID:', tokenUser?.user_id, '-> converted to number:', Number(tokenUser?.user_id));
+        console.log('Current staff ID:', tokenUser?.user_id, '-> converted to number:', Number(tokenUser?.user_id));
+        console.log('Date of birth:', formData.dob, '-> formatted:', formatDateForAPI(formData.dob));
+        console.log('Relationship date:', formData.contactDate, '-> formatted:', formatDateForAPI(formData.contactDate));
+
         const createLead = await api.post('/lead/create', leadPayload);
-        if(createLead.data[0].statusCode === 200) {
-          setAlertInfo({ variant: 'success', title: 'Success!', message: 'Lead has been created successfully.' })
+        console.log("Lead Create API Response:", createLead);
+        console.log("Lead Create API Response Data:", createLead.data);
+        console.log("Response Status:", createLead.status);
+        
+        // Check if the response indicates success
+        if (createLead.status === 200 || createLead.status === 201) {
+          setAlertInfo({ 
+            variant: 'success', 
+            title: 'Success!', 
+            message: 'Lead has been created successfully.' 
+          });
           setTimeout(() => {
             router.push("/lead");
-          }, 3000);
+          }, 1500);
+        } else {
+          // Handle error response
+          const errorMessage = createLead.data?.message || 'Failed to create lead';
+          setAlertInfo({
+            variant: 'error',
+            title: 'Error',
+            message: errorMessage
+          });
         }
-    } catch {
-        setAlertInfo({ variant: 'error', title: 'Save Failed', message: 'An error occurred while saving the lead. Please try again.' });
+    } catch (error: unknown) {
+        console.error('Error creating lead:', error);
+        setAlertInfo({ 
+          variant: 'error', 
+          title: 'Save Failed', 
+          message: 'An error occurred while saving the lead. Please try again.' 
+        });
     } finally {
         setIsSaving(false);
     }

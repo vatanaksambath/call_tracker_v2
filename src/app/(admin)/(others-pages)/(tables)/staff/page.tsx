@@ -25,7 +25,7 @@ const staffSearchOptions = [
 export default function StaffPage() {
   const [currentPage, setCurrentPage] = React.useState(1);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [searchType, setSearchType] = React.useState("staff_id");
+  const [searchType, setSearchType] = React.useState("");
   const pageSize = 10;
   
   const { staff, isLoading, totalRows } = useStaffData(currentPage, pageSize, searchQuery, searchType);

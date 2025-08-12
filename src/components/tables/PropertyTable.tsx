@@ -20,6 +20,7 @@ interface ApiPropertyData {
   address: string;
   project_name: string;
   property_type_name: string;
+  property_status_name: string;
   room_number: string;
   home_number: string;
   width: number;
@@ -40,6 +41,7 @@ export interface Property {
   address: string;
   project: string;
   type: string;
+  status: string;
   room: string;
   home: string;
   width: number;
@@ -62,6 +64,7 @@ export const propertyColumnConfig: { key: keyof Property; label: string }[] = [
   { key: 'address', label: 'Address' },
   { key: 'project', label: 'Project' },
   { key: 'type', label: 'Property Type' },
+  { key: 'status', label: 'Status' },
   { key: 'room', label: 'Room Number' },
   { key: 'home', label: 'Home Number' },
   { key: 'width', label: 'Width' },
@@ -144,6 +147,7 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
             address: property.address,
             project: property.project_name,
             type: property.property_type_name,
+            status: property.property_status_name || 'Unknown',
             room: property.room_number,
             home: property.home_number,
             width: property.width,
@@ -176,9 +180,8 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
   }, [currentPage, searchTerm]);
 
   const totalPages = Math.ceil(totalRows / pageLimit);
-  const columnsToShow: (keyof Property)[] = visibleColumns || ['id', 'name', 'address', 'project', 'type', 'room', 'home', 'width', 'length', 'is_active'];
+  const columnsToShow: (keyof Property)[] = visibleColumns || ['id', 'name', 'address', 'project', 'type', 'status', 'room', 'home', 'width', 'length'];
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const getStatusBadge = (status: string) => {
     const baseClasses = "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium";
     switch (status?.toLowerCase()) {
@@ -193,6 +196,36 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
     }
   };
 
+  // Format price with $ and commas
+  const formatPrice = (price: number) => {
+    return `$${price.toLocaleString()}`;
+  };
+
+  // Format datetime with AM/PM
+  const formatDateTime = (dateString: string) => {
+    if (!dateString) return '-';
+    try {
+      const date = new Date(dateString);
+      return date.toLocaleString('en-US', {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true
+      });
+    } catch {
+      return dateString;
+    }
+  };
+
+  // Styled component for highlighted fields - more subtle version
+  const HighlightedCell = ({ children, className = "" }: { children: React.ReactNode; className?: string }) => (
+    <div className={`inline-flex items-center px-2 py-1 rounded-md bg-gray-50 dark:bg-gray-800/30 font-medium text-sm ${className}`}>
+      {children}
+    </div>
+  );
+
   const handleActionSelect = (action: 'view' | 'edit' | 'delete', property: Property) => {
     if (action === 'view') {
       router.push(`/property/view?id=${property.id}`);
@@ -205,6 +238,21 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
       }
     }
   };
+
+  if (isLoading) {
+    return (
+      <div className="space-y-4">
+        <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-white/[0.05] dark:bg-white/[0.03]">
+          <div className="flex items-center justify-center h-64">
+            <div className="text-center">
+              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-500 mx-auto mb-4"></div>
+              <p className="text-gray-600 dark:text-gray-400">Loading properties...</p>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   if (!isLoading && properties.length === 0) {
     return (
@@ -230,7 +278,6 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
 
   return (
     <div className="space-y-4">
-      {/* Total Properties Summary */}
       {/* Table */}
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-white/[0.05] dark:bg-white/[0.03]">
         <div className="max-w-full overflow-x-auto">
@@ -267,18 +314,68 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                       .filter(col => columnsToShow.includes(col.key))
                       .map((column) => {
                         const value = property[column.key];
-                        if (column.key === 'is_active') {
+                        
+                        // Format specific columns with subtle emphasis
+                        if (column.key === 'name' && typeof value === 'string') {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                              <HighlightedCell className="text-gray-900 dark:text-white">
+                                {value}
+                              </HighlightedCell>
+                            </TableCell>
+                          );
+                        } else if (column.key === 'room' && value) {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                              <HighlightedCell className="text-gray-800 dark:text-gray-200">
+                                {String(value)}
+                              </HighlightedCell>
+                            </TableCell>
+                          );
+                        } else if (column.key === 'width' && typeof value === 'number') {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                              <HighlightedCell className="text-gray-800 dark:text-gray-200">
+                                {value}m
+                              </HighlightedCell>
+                            </TableCell>
+                          );
+                        } else if (column.key === 'length' && typeof value === 'number') {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                              <HighlightedCell className="text-gray-800 dark:text-gray-200">
+                                {value}m
+                              </HighlightedCell>
+                            </TableCell>
+                          );
+                        } else if (column.key === 'price' && typeof value === 'number') {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                              <HighlightedCell className="text-green-600 dark:text-green-400 font-semibold">
+                                {formatPrice(value)}
+                              </HighlightedCell>
+                            </TableCell>
+                          );
+                        } else if (column.key === 'status' && typeof value === 'string') {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                              <span className={getStatusBadge(value)}>
+                                {value}
+                              </span>
+                            </TableCell>
+                          );
+                        } else if (column.key === 'created_date' || column.key === 'last_update') {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                              {formatDateTime(value as string)}
+                            </TableCell>
+                          );
+                        } else if (column.key === 'is_active') {
                           return (
                             <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
                               <span className={value ? 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400' : 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400'}>
                                 {value ? 'Active' : 'Inactive'}
                               </span>
-                            </TableCell>
-                          );
-                        } else if (column.key === 'name' && typeof value === 'string') {
-                          return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
-                              <div className="font-medium">{value}</div>
                             </TableCell>
                           );
                         } else {

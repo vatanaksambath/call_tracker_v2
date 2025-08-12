@@ -1,7 +1,7 @@
 "use client";
 import React, { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import api, { getUserFromToken } from "@/lib/api";
+import api from "@/lib/api";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
 import Button from "@/components/ui/button/Button";
@@ -13,7 +13,7 @@ import TextArea from "@/components/form/input/TextArea";
 import ImageUpload from "@/components/form/ImageUpload";
 import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 import Address, { IAddress } from "@/components/form/Address";
-import ContactInfo, { IContactChannel, IContactValue } from "@/components/form/ContactInfo";
+import ContactInfo, { IContactChannel } from "@/components/form/ContactInfo";
 import { formatDateForAPI } from "@/lib/utils";
 
 interface SelectOption {
@@ -45,6 +45,7 @@ export default function CreateStaffPage() {
     staffCode: "",
     position: "",
     department: null as SelectOption | null,
+    manager: null as SelectOption | null,
     employmentType: null as SelectOption | null,
     employmentLevel: null as SelectOption | null,
     employmentStartDate: null as Date | null,
@@ -59,13 +60,14 @@ export default function CreateStaffPage() {
 
   type StaffFormErrors = {
     firstName?: string; lastName?: string; gender?: string; dob?: string; email?: string;
-    staffCode?: string; position?: string; department?: string; 
+    staffCode?: string; position?: string; department?: string; manager?: string;
     employmentType?: string; employmentLevel?: string; employmentStartDate?: string;
     address?: string; remark?: string; contact_data?: string;
   };
 
   const [errors, setErrors] = useState<StaffFormErrors>({});
   const [departmentOptions, setDepartmentOptions] = useState<SelectOption[]>([]);
+  const [managerOptions, setManagerOptions] = useState<SelectOption[]>([]);
   const [employmentTypeOptions, setEmploymentTypeOptions] = useState<SelectOption[]>([]);
   const [employmentLevelOptions, setEmploymentLevelOptions] = useState<SelectOption[]>([]);
   const [isSaving, setIsSaving] = useState(false);
@@ -78,10 +80,10 @@ export default function CreateStaffPage() {
         { value: "3", label: "Other" }
     ],
     employmentType: [
-        { value: "Full-time", label: "Full-time" },
-        { value: "Part-time", label: "Part-time" },
-        { value: "Contract", label: "Contract" },
-        { value: "Intern", label: "Intern" }
+        { value: "full time", label: "Full Time" },
+        { value: "part time", label: "Part Time" },
+        { value: "contract", label: "Contract" },
+        { value: "intern", label: "Intern" }
     ],
     employmentLevel: [
         { value: "Entry", label: "Entry Level" },
@@ -105,16 +107,24 @@ export default function CreateStaffPage() {
           { value: "4", label: "Operations" },
           { value: "5", label: "Marketing" }
         ]);
+
+        // For now, use default manager options
+        // In production, replace with actual API endpoint: const managerResponse = await api.get('/staff/managers');
+        setManagerOptions([
+          { value: "1", label: "John Manager" },
+          { value: "2", label: "Jane Supervisor" },
+          { value: "3", label: "Bob Director" }
+        ]);
       } catch (error) {
         console.error('Error fetching dropdown data:', error);
       }
 
       // Set employment options from local data
       setEmploymentTypeOptions([
-        { value: "Full-time", label: "Full-time" },
-        { value: "Part-time", label: "Part-time" },
-        { value: "Contract", label: "Contract" },
-        { value: "Intern", label: "Intern" }
+        { value: "full time", label: "Full Time" },
+        { value: "part time", label: "Part Time" },
+        { value: "contract", label: "Contract" },
+        { value: "intern", label: "Intern" }
       ]);
       setEmploymentLevelOptions([
         { value: "Entry", label: "Entry Level" },
@@ -151,6 +161,7 @@ export default function CreateStaffPage() {
     if (!formData.staffCode.trim()) newErrors.staffCode = "Staff code is required.";
     if (!formData.position.trim()) newErrors.position = "Position is required.";
     if (!formData.department) newErrors.department = "Please select a department.";
+    if (!formData.manager) newErrors.manager = "Please select a manager.";
     if (!formData.employmentType) newErrors.employmentType = "Please select employment type.";
     if (!formData.employmentStartDate) newErrors.employmentStartDate = "Employment start date is required.";
     
@@ -171,41 +182,70 @@ export default function CreateStaffPage() {
     setIsSaving(true);
     
     try {
-      const user = getUserFromToken();
-      
+      // Handle photo upload if present
+      let photoUrl = null;
+      if (formData.photo) {
+        const photoFormData = new FormData();
+        photoFormData.append('photo', formData.photo);
+        photoFormData.append('menu', 'staff');
+        const uploadResponse = await api.post('/files/upload-one-photo', photoFormData, {
+          headers: { 'Content-Type': 'multipart/form-data' }
+        });
+        photoUrl = uploadResponse.data.imageUrl;
+      }
+
+      // Process contact data to match API structure
+      const contactDataGrouped = formData.contact_data.reduce((acc, channel) => {
+        if (channel.channel_type && channel.contact_values.length > 0) {
+          acc.push({
+            channel_type_id: channel.channel_type.value,
+            contact_values: channel.contact_values.map(val => ({
+              user_name: val.user_name || "staff.user", // Default username if not provided
+              contact_number: val.contact_number,
+              remark: val.remark || "",
+              is_primary: val.is_primary
+            }))
+          });
+        }
+        return acc;
+      }, [] as { channel_type_id: string; contact_values: { user_name: string; contact_number: string; remark: string; is_primary: boolean }[] }[]);
+
       const staffData = {
+        staff_id: formData.staffCode, // Use staff code as staff_id
         staff_code: formData.staffCode,
         first_name: formData.firstName,
         last_name: formData.lastName,
         gender_id: formData.gender?.value,
-        email: formData.email || null,
+        village_id: formData.address.village?.value || null,
+        manager_id: formData.manager?.value || "1", // Use selected manager or default
         date_of_birth: formatDateForAPI(formData.dob),
         position: formData.position,
         department: formData.department?.label || null,
-        employment_type: formData.employmentType?.value,
-        employment_level: formData.employmentLevel?.value || null,
+        employment_type: formData.employmentType?.label || null, // Use .label not .value
         employment_start_date: formatDateForAPI(formData.employmentStartDate),
-        current_address: `${formData.address.homeAddress || ''} ${formData.address.streetAddress || ''}`.trim() || null,
-        is_active: true,
-        created_by: user?.user_name || 'System',
-        contact_data: formData.contact_data.map((channel: IContactChannel) => ({
-          channel_type_id: channel.channel_type?.value,
-          channel_type_name: channel.channel_type?.label,
-          contact_values: channel.contact_values.map((contact: IContactValue) => ({
-            contact_number: contact.contact_number,
-            is_primary: contact.is_primary,
-            remark: contact.remark || ""
-          }))
-        })),
-        remark: formData.remark || null
+        employment_end_date: null,
+        employment_level: formData.employmentLevel?.label || null, // Use .label not .value
+        current_address: formData.address.homeAddress || null,
+        photo_url: photoUrl && photoUrl.length > 0 ? photoUrl[0] : null, // Single URL or null, not array
+        menu_id: "MU_05",
+        contact_data: contactDataGrouped
       };
 
-      console.log('Creating staff with data:', staffData);
+      console.log('Staff payload before API call:', JSON.stringify(staffData, null, 2));
+      console.log('Date of birth:', formData.dob, '-> formatted:', formatDateForAPI(formData.dob));
+      console.log('Employment start date:', formData.employmentStartDate, '-> formatted:', formatDateForAPI(formData.employmentStartDate));
+      console.log('Email:', formData.email);
+      console.log('Street address:', formData.address.streetAddress);
+      console.log('API Base URL:', process.env.NEXT_PUBLIC_API_BASE_URL);
       
       // Use staff API endpoint
       const response = await api.post('/staff/create', staffData);
+      console.log("Staff Create API Response:", response);
+      console.log("Staff Create API Response Data:", response.data);
+      console.log("Response Status:", response.status);
       
-      if (response.data) {
+      // Check if the response indicates success
+      if (response.status === 200 || response.status === 201) {
         setAlertInfo({
           variant: 'success',
           title: 'Success!',
@@ -216,6 +256,14 @@ export default function CreateStaffPage() {
         setTimeout(() => {
           router.push('/staff');
         }, 1500);
+      } else {
+        // Handle error response
+        const errorMessage = response.data?.message || 'Failed to create staff member';
+        setAlertInfo({
+          variant: 'error',
+          title: 'Error',
+          message: errorMessage
+        });
       }
     } catch (error: unknown) {
       console.error('Error creating staff:', error);
@@ -390,6 +438,18 @@ export default function CreateStaffPage() {
                         className="dark:bg-dark-900 dark:border-dark-700 dark:text-white"
                       />
                       {errors.department && <p className="text-sm text-red-500 mt-1">{errors.department}</p>}
+                    </div>
+
+                    <div className="col-span-2 lg:col-span-1">
+                      <Label>Manager *</Label>
+                      <Select
+                        options={managerOptions}
+                        value={formData.manager || undefined}
+                        onChange={(selectedOption) => handleChange("manager", selectedOption)}
+                        placeholder="Select manager"
+                        className="dark:bg-dark-900 dark:border-dark-700 dark:text-white"
+                      />
+                      {errors.manager && <p className="text-sm text-red-500 mt-1">{errors.manager}</p>}
                     </div>
 
                     <div className="col-span-2 lg:col-span-1">

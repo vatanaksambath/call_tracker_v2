@@ -25,7 +25,7 @@ const navItems: NavItem[] = [
     icon: <GridIcon />,
     name: "Dashboard",
     subItems: [
-      { name: "Home", path: "/", pro: false }
+      { name: "Analytics", path: "/dashboard", pro: false }
     ],
   },
   // {
@@ -41,7 +41,7 @@ const navItems: NavItem[] = [
   //   subItems: [{ name: "Form Elements", path: "/form-elements", pro: false }],
   // },
   {
-    name: "Tables",
+    name: "Management",
     icon: <TableIcon />,
     subItems: [
       // { name: "Basic Table", path: "/basic-tables", pro: false },
@@ -49,10 +49,7 @@ const navItems: NavItem[] = [
       // { name: "Site Visit List", path: "/sitevisit", pro: false },
       { name: "Leads", path: "/lead", pro: false },
       { name: "Call Pipeline", path: "/callpipeline", pro: false },
-      { name: "Staff", path: "/staff", pro: false },
       { name: "Property", path: "/property", pro: false },
-      { name: "developer", path: "/developer", pro: false },
-      { name: "project", path: "/project", pro: false },
       // { name: "Call History", path: "/callhistory-tables", pro: false }
     ],
   },
@@ -80,8 +77,11 @@ const othersItems: NavItem[] = [
     name: "Settings",
     subItems: [
       { name: "Property Type", path: "/property-type", pro: false },
+      { name: "developer", path: "/developer", pro: false },
+      { name: "project", path: "/project", pro: false },
       { name: "location", path: "/location", pro: false },
       { name: "Channel", path: "/channel", pro: false },
+      { name: "Staff", path: "/staff", pro: false },
       // { name: "alerts", path: "/alerts", pro: false },
       // { name: "Avatar", path: "/avatars", pro: false },
       // { name: "Badge", path: "/badge", pro: false },

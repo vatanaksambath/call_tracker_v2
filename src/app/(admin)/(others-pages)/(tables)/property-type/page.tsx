@@ -30,7 +30,7 @@ const propertyTypeSearchOptions = [
 export default function PropertyTypePage() {
   const [currentPage, setCurrentPage] = React.useState(1);
   const [searchQuery, setSearchQuery] = React.useState("");
-  const [searchType, setSearchType] = React.useState("property_type_id");
+  const [searchType, setSearchType] = React.useState("");
   const pageSize = 10;
   
   const { propertyTypes, isLoading, totalRows } = usePropertyTypeData(currentPage, pageSize, searchQuery, searchType);

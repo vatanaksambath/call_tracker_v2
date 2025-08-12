@@ -30,6 +30,7 @@ interface SelectionModalProps<T> {
   columns: { key: string; label: string }[];
   searchPlaceholder: string;
   isLoading?: boolean;
+  extraActions?: React.ReactNode;
 }
 
 function SelectionModal<T>({
@@ -41,6 +42,7 @@ function SelectionModal<T>({
   columns,
   searchPlaceholder,
   isLoading,
+  extraActions,
 }: SelectionModalProps<T>) {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentPage, setCurrentPage] = useState(1);
@@ -89,7 +91,7 @@ function SelectionModal<T>({
           Choose an item from the list below.
         </p>
       </div>
-      <div className="flex flex-col gap-3 sm:flex-row sm:items-center mb-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between mb-4">
         <form>
           <div className="relative">
             <button 
@@ -121,6 +123,11 @@ function SelectionModal<T>({
             />
           </div>
         </form>
+        {extraActions && (
+          <div className="flex items-center">
+            {extraActions}
+          </div>
+        )}
       </div>
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-white/[0.05] dark:bg-white/[0.03] min-h-[400px]">
         {isLoading ? (

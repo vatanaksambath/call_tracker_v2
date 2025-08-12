@@ -21,6 +21,40 @@ import api from "@/lib/api";
 import LoadingOverlay from "../ui/loading/LoadingOverlay";
 import { useRouter } from "next/navigation";
 
+// Phone number formatting function for Cambodia
+const formatPhoneNumber = (phoneNumber: string): string => {
+    if (!phoneNumber || typeof phoneNumber !== 'string') return phoneNumber;
+    
+    // Remove all non-digit characters
+    const digits = phoneNumber.replace(/\D/g, "");
+    
+    // Check if it has characters or length < 8, leave it as is
+    if (phoneNumber !== digits || digits.length < 8) {
+        return phoneNumber; // Contains characters or too short
+    }
+    
+    // Handle different phone number formats
+    if (digits.startsWith("855")) {
+        // Already has country code
+        const remaining = digits.slice(3);
+        if (remaining.length >= 6) {
+            const part1 = remaining.slice(0, 3);
+            const part2 = remaining.slice(3, 6);
+            const part3 = remaining.slice(6);
+            return `(+855) ${part1}-${part2}-${part3}`;
+        }
+    } else if (digits.length >= 8) {
+        // Assume it's a local number, add Cambodia country code
+        const part1 = digits.slice(0, 3);
+        const part2 = digits.slice(3, 6);
+        const part3 = digits.slice(6);
+        return `(+855) ${part1}-${part2}-${part3}`;
+    }
+    
+    // If formatting fails, return original
+    return phoneNumber;
+};
+
 interface ApiLeadData {
   lead_id: string;
   first_name: string;
@@ -270,7 +304,7 @@ const Pagination = ({ currentPage, totalPages, onPageChange }: { currentPage: nu
             <Button variant="outline" size="sm" onClick={() => onPageChange(currentPage - 1)} disabled={currentPage === 1}><ChevronLeftIcon className="h-4 w-4" /></Button>
             {getPageNumbers().map((page, index) =>
                 typeof page === 'number' ? (
-                    <Button key={index} variant={currentPage === page ? 'outline' : 'primary'} size="sm" onClick={() => onPageChange(page)} className="w-9">{page}</Button>
+                    <Button key={index} variant={currentPage === page ? 'primary' : 'outline'} size="sm" onClick={() => onPageChange(page)} className="w-9">{page}</Button>
                 ) : (
                     <span key={index} className="px-2 py-1 text-sm">...</span>
                 )
@@ -373,13 +407,13 @@ const LeadsTable: React.FC<LeadsTableProps> = ({
         switch (columnKey) {
             case 'fullName':
                 return (
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 overflow-hidden rounded-full">
-                            <Image width={40} height={40} src={lead.avatar} alt={lead.fullName} onError={(e) => { e.currentTarget.src = "/images/user/user-02.jpg"; }}/>
+                    <div className="flex items-center gap-2">
+                        <div className="w-8 h-8 overflow-hidden rounded-full">
+                            <Image width={32} height={32} src={lead.avatar} alt={lead.fullName} onError={(e) => { e.currentTarget.src = "/images/user/user-02.jpg"; }}/>
                         </div>
                         <div>
-                            <span className="block font-medium text-gray-800 text-theme-sm dark:text-white/90">{lead.fullName}</span>
-                            <span className="block text-gray-500 text-theme-xs dark:text-gray-400">{lead.email}</span>
+                            <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">{lead.fullName}</span>
+                            <span className="block text-gray-500 text-xs dark:text-gray-400 mt-0.5">{lead.email}</span>
                         </div>
                     </div>
                 );
@@ -388,6 +422,21 @@ const LeadsTable: React.FC<LeadsTableProps> = ({
                     <Badge size="sm" color={lead.status === "Active" ? "success" : "error"}>
                         {lead.status}
                     </Badge>
+                );
+            case 'phone':
+                const phoneValue = lead[columnKey];
+                const formattedPhone = typeof phoneValue === 'string' ? formatPhoneNumber(phoneValue) : phoneValue;
+                return (
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300">
+                        {formattedPhone || 'N/A'}
+                    </span>
+                );
+            case 'contactDate':
+                const contactDateValue = lead[columnKey];
+                return (
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-300">
+                        {typeof contactDateValue === 'string' || typeof contactDateValue === 'number' ? contactDateValue : 'N/A'}
+                    </span>
                 );
             default:
                 const value = lead[columnKey];
@@ -430,15 +479,15 @@ const LeadsTable: React.FC<LeadsTableProps> = ({
                                         </TableRow>
                                 ) : (
                                     leads.map((lead) => (
-                                        <TableRow key={lead.id} className="h-16">
+                                        <TableRow key={lead.id} className="h-12">
                                             {sortedVisibleColumns.map(col => (
-                                                <TableCell key={`${lead.id}-${col.key}`} className="px-5 py-4 text-start text-theme-sm h-16 overflow-hidden">
+                                                <TableCell key={`${lead.id}-${col.key}`} className="px-5 py-2 text-start text-theme-sm h-12 overflow-hidden">
                                                     <div className="truncate max-w-xs">
                                                         {renderCellContent(lead, col.key)}
                                                     </div>
                                                 </TableCell>
                                             ))}
-                                            <TableCell className="px-4 py-3 text-center h-16">
+                                            <TableCell className="px-4 py-2 text-center h-12">
                                                 <ActionMenu lead={lead} onSelect={handleActionSelect} />
                                             </TableCell>
                                         </TableRow>

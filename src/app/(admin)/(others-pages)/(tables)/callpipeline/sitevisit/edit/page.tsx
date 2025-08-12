@@ -1,6 +1,7 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import api from "@/lib/api";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
 import Button from "@/components/ui/button/Button";
@@ -10,6 +11,7 @@ import TextArea from "@/components/form/input/TextArea";
 import InputField from "@/components/form/input/InputField";
 import { TimeIcon } from "@/icons";
 import PhotoUpload, { PhotoFile } from "@/components/form/PhotoUpload";
+import SuccessModal from "@/components/ui/modal/SuccessModal";
 
 interface SiteVisitData {
   site_visit_id: string;
@@ -83,6 +85,7 @@ export default function EditSiteVisitPage() {
   });
   const [errors, setErrors] = useState<SiteVisitFormErrors>({});
   const [photos, setPhotos] = useState<PhotoFile[]>([]);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   // Load pipeline and site visit data
   const loadData = useCallback(async () => {
@@ -135,83 +138,117 @@ export default function EditSiteVisitPage() {
         }
       }
 
-      // Load site visit data
-      const visitBody = {
+      // Load site visit data with pipeline validation
+      // First, get all site visits for this pipeline to ensure the site visit belongs to it
+      const pipelineVisitsBody = {
         page_number: "1",
-        page_size: "10",
-        search_type: "site_visit_id",
-        query_search: siteVisitId,
+        page_size: "100",
+        search_type: "call_log_id",
+        query_search: pipelineId,
       };
 
-      const visitRes = await fetch(`${apiBase}/site-visit/pagination`, {
+      const pipelineVisitsRes = await fetch(`${apiBase}/site-visit/pagination`, {
         method: "POST",
         headers,
-        body: JSON.stringify(visitBody),
+        body: JSON.stringify(pipelineVisitsBody),
       });
 
-      if (visitRes.ok) {
-        const visitData = await visitRes.json();
-        let visitArr = [];
-        if (Array.isArray(visitData) && visitData.length > 0 && visitData[0].data) {
-          visitArr = visitData[0].data;
+      if (!pipelineVisitsRes.ok) {
+        throw new Error("Failed to fetch pipeline site visits");
+      }
+
+      const pipelineVisitsData = await pipelineVisitsRes.json();
+      let pipelineVisitsArr = [];
+      if (Array.isArray(pipelineVisitsData) && pipelineVisitsData.length > 0 && pipelineVisitsData[0].data) {
+        pipelineVisitsArr = pipelineVisitsData[0].data;
+      }
+
+      // Find the specific site visit in the pipeline's site visits
+      const targetSiteVisit = pipelineVisitsArr.find((visit: SiteVisitData) => 
+        visit.site_visit_id === siteVisitId
+      );
+
+      if (!targetSiteVisit) {
+        throw new Error(`Site visit ${siteVisitId} not found in pipeline ${pipelineId}`);
+      }
+
+      // Use the found site visit data
+      const visit = targetSiteVisit;
+      setSiteVisitData(visit);
+
+      // Parse date and time from datetime strings
+      const startDateTime = String(visit.start_datetime || '');
+      const endDateTime = String(visit.end_datetime || '');
+
+      let visitDate = '';
+      let visitStartTime = '';
+      let visitEndTime = '';
+
+      if (startDateTime) {
+        const startParts = startDateTime.split(' ');
+        if (startParts.length >= 2) {
+          visitDate = startParts[0];
+          visitStartTime = startParts[1];
         }
+      }
 
-        if (visitArr.length > 0) {
-          const visit = visitArr[0];
-          setSiteVisitData(visit);
+      if (endDateTime) {
+        const endParts = endDateTime.split(' ');
+        if (endParts.length >= 2) {
+          visitEndTime = endParts[1];
+        }
+      }
 
-          // Parse date and time from datetime strings
-          const startDateTime = String(visit.start_datetime || '');
-          const endDateTime = String(visit.end_datetime || '');
+      // Populate form data
+      setFormData({
+        visitDate: visitDate,
+        visitStartTime: visitStartTime,
+        visitEndTime: visitEndTime,
+        purpose: String(visit.purpose || ''),
+        remark: String(visit.remark || ''),
+      });
 
-          let visitDate = '';
-          let visitStartTime = '';
-          let visitEndTime = '';
-
-          if (startDateTime) {
-            const startParts = startDateTime.split(' ');
-            if (startParts.length >= 2) {
-              visitDate = startParts[0];
-              visitStartTime = startParts[1];
+      // Convert existing images to PhotoFile format if any
+      if (visit.photo_url && Array.isArray(visit.photo_url) && visit.photo_url.length > 0) {
+        console.log("Original photo URLs:", visit.photo_url);
+        const photoFiles: PhotoFile[] = visit.photo_url
+          .filter((url: string) => {
+            // Skip placeholder/example URLs
+            if (url.includes('example.com') || url.includes('placeholder')) {
+              console.log('Skipping placeholder URL:', url);
+              return false;
             }
-          }
-
-          if (endDateTime) {
-            const endParts = endDateTime.split(' ');
-            if (endParts.length >= 2) {
-              visitEndTime = endParts[1];
-            }
-          }
-
-          // Populate form data
-          setFormData({
-            visitDate: visitDate,
-            visitStartTime: visitStartTime,
-            visitEndTime: visitEndTime,
-            purpose: String(visit.purpose || ''),
-            remark: String(visit.remark || ''),
-          });
-
-          // Convert existing images to PhotoFile format if any
-          if (visit.photo_url && Array.isArray(visit.photo_url) && visit.photo_url.length > 0) {
-            const photoFiles: PhotoFile[] = visit.photo_url.map((url: string, index: number) => ({
+            return true;
+          })
+          .map((url: string, index: number) => {
+            const proxyUrl = `/api/proxy-image?url=${encodeURIComponent(url)}`;
+            console.log(`Photo ${index + 1}: ${url} -> ${proxyUrl}`);
+            return {
               id: `existing-${index}`,
               file: null,
-              preview: url,
+              preview: proxyUrl, // Use proxy endpoint
               name: `Photo ${index + 1}`,
               size: 0,
               isExisting: true,
-            }));
-            setPhotos(photoFiles);
-          }
-        }
+            };
+          });
+        setPhotos(photoFiles);
       }
     } catch (error) {
       console.error("Error loading data:", error);
+      
+      // Check if this is a "site visit not found in pipeline" error
+      if (error instanceof Error && error.message.includes('not found in pipeline')) {
+        alert(`Access denied: This site visit does not belong to pipeline ${pipelineId}. You will be redirected to the site visit history.`);
+        router.push(`/callpipeline/sitevisit?pipelineId=${pipelineId}`);
+        return;
+      }
+      
+      alert('Failed to load site visit data. Please try again.');
     } finally {
       setIsLoading(false);
     }
-  }, [pipelineId, siteVisitId]);
+  }, [pipelineId, siteVisitId, router]);
 
   useEffect(() => {
     loadData();
@@ -231,14 +268,30 @@ export default function EditSiteVisitPage() {
 
   // Handle photos change from PhotoUpload component
   const handlePhotosChange = (newPhotos: PhotoFile[]) => {
-    // Merge existing photos with new photos
-    const existingPhotos = photos.filter(photo => photo.isExisting);
-    const allPhotos = [...existingPhotos, ...newPhotos.map(photo => ({
-      ...photo,
-      isExisting: false,
-    }))];
+    setPhotos(newPhotos);
+  };
+
+  // Upload single photo function (following lead edit pattern)
+  const uploadPhotoToStorage = async (photoFile: File): Promise<string> => {
+    const photoFormData = new FormData();
+    photoFormData.append('photo', photoFile);
+    photoFormData.append('menu', 'site_visit');
+    photoFormData.append('photoId', String(siteVisitId));
     
-    setPhotos(allPhotos);
+    const uploadResponse = await api.post('/files/upload-one-photo', photoFormData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    
+    console.log('Upload response:', uploadResponse.data);
+    console.log('Extracted imageUrl:', uploadResponse.data.imageUrl);
+    
+    // Extract the imageUrl from the response
+    const imageUrl = uploadResponse.data.imageUrl;
+    if (!imageUrl) {
+      throw new Error('No imageUrl returned from upload response');
+    }
+    
+    return imageUrl;
   };
 
   const validateForm = () => {
@@ -273,19 +326,41 @@ export default function EditSiteVisitPage() {
       const endDatetime = formData.visitEndTime ? `${formData.visitDate} ${formData.visitEndTime}` : '';
 
       // Prepare photo URLs - combine existing and new photos
-      const existingPhotos = photos.filter(photo => photo.isExisting).map(photo => photo.preview);
+      const existingPhotos = photos.filter(photo => photo.isExisting).map(photo => {
+        // Remove proxy prefix from existing photos to get original URLs
+        const proxyPrefix = '/api/proxy-image?url=';
+        if (photo.preview.startsWith(proxyPrefix)) {
+          return decodeURIComponent(photo.preview.substring(proxyPrefix.length));
+        }
+        return photo.preview;
+      });
       const newPhotoFiles = photos.filter(photo => !photo.isExisting && photo.file);
       
-      // For now, just use existing photos. In a real implementation, 
-      // new photos would be uploaded to a file storage service first
+      console.log('Existing photos:', existingPhotos);
+      console.log('New photo files to upload:', newPhotoFiles.length);
+      
       const photoUrls = [...existingPhotos];
       
-      // TODO: Upload new files to storage service and get URLs
+      // Upload new photos if any
       if (newPhotoFiles.length > 0) {
-        console.log("New photos to upload:", newPhotoFiles);
-        // Example: Upload files and get URLs
-        // const uploadedUrls = await uploadPhotosToStorage(newPhotoFiles);
-        // photoUrls.push(...uploadedUrls);
+        console.log("Uploading new photos:", newPhotoFiles.length);
+        try {
+          // Upload photos one by one following lead edit pattern
+          for (const photoFile of newPhotoFiles) {
+            if (photoFile.file) {
+              console.log(`Uploading photo: ${photoFile.name}`);
+              const uploadedUrl = await uploadPhotoToStorage(photoFile.file);
+              photoUrls.push(uploadedUrl);
+              console.log("Successfully uploaded photo, URL:", uploadedUrl);
+            }
+          }
+          console.log('Final photo URLs array:', photoUrls);
+        } catch (uploadError) {
+          console.error("Error uploading photos:", uploadError);
+          alert("Error uploading photos. Please try again.");
+          setIsSubmitting(false);
+          return;
+        }
       }
 
       const updatedData = {
@@ -294,36 +369,51 @@ export default function EditSiteVisitPage() {
         property_profile_id: String(siteVisitData.property_profile_id),
         staff_id: String(siteVisitData.staff_id),
         lead_id: siteVisitData.lead_id,
-        contact_result_id: siteVisitData.contact_result_id,
+        contact_result_id: String(siteVisitData.contact_result_id),
         purpose: formData.purpose,
         start_datetime: startDatetime,
         end_datetime: endDatetime,
         photo_url: photoUrls, // Updated with current photos
         remark: formData.remark,
+        is_active: siteVisitData.is_active, // Add missing is_active field
       };
       
-      console.log("Updated Site Visit Data to submit:", updatedData);
+      console.log("Updated Site Visit Data to submit:");
+      console.log("- site_visit_id:", updatedData.site_visit_id);
+      console.log("- photo_url array:", updatedData.photo_url);
+      console.log("- photo_url length:", updatedData.photo_url.length);
+      console.log("Full updatedData:", updatedData);
       
-      // TODO: Replace with actual API call when backend update endpoint is ready
-      // const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
-      // const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      // const headers: Record<string, string> = { "Content-Type": "application/json" };
-      // if (token) headers["Authorization"] = `Bearer ${token}`;
+      // Make actual API call for site visit update
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
       
-      // const updateRes = await fetch(`${apiBase}/site-visit/update`, {
-      //   method: "PUT",
-      //   headers,
-      //   body: JSON.stringify(updatedData),
-      // });
+      console.log("About to make PUT request to:", `${apiBase}/site-visit/update`);
+      console.log("Request headers:", headers);
       
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      const response = await fetch(`${apiBase}/site-visit/update`, {
+        method: "PUT",
+        headers,
+        body: JSON.stringify(updatedData),
+      });
       
-      // Show success alert
-      alert("Site visit updated successfully!");
+      const responseData = await response.json();
+      console.log("Update Site Visit API Response:", responseData);
       
-      // Navigate back to site visit page
-      router.push(`/callpipeline/sitevisit?pipelineId=${pipelineId}`);
+      if (!response.ok) {
+        console.error("API Error Response:", responseData);
+        // Handle specific error cases
+        if (responseData.error) {
+          throw new Error(`Failed to update site visit: ${responseData.error}`);
+        } else {
+          throw new Error(`Failed to update site visit: ${response.status} - ${JSON.stringify(responseData)}`);
+        }
+      }
+      
+      // Show success modal instead of alert
+      setShowSuccessModal(true);
       
     } catch (error) {
       console.error("Error updating site visit:", error);
@@ -334,6 +424,11 @@ export default function EditSiteVisitPage() {
   };
 
   const handleCancel = () => {
+    router.push(`/callpipeline/sitevisit?pipelineId=${pipelineId}`);
+  };
+
+  const handleSuccessModalClose = () => {
+    setShowSuccessModal(false);
     router.push(`/callpipeline/sitevisit?pipelineId=${pipelineId}`);
   };
 
@@ -540,6 +635,15 @@ export default function EditSiteVisitPage() {
           </div>
         </ComponentCard>
       </div>
+
+      {/* Success Modal */}
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={handleSuccessModalClose}
+        title="Site Visit Updated Successfully!"
+        message="The site visit information has been updated and saved to the database."
+        confirmButtonText="Continue"
+      />
     </div>
   );
 }

@@ -1,37 +1,23 @@
 
 'use client';
 
-import { EcommerceMetrics } from "@/components/ecommerce/EcommerceMetrics";
-import React from "react"; // No need to import useEffect and useState here anymore
-import MonthlyTarget from "@/components/ecommerce/MonthlyTarget";
-import MonthlySalesChart from "@/components/ecommerce/MonthlySalesChart";
-import StatisticsChart from "@/components/ecommerce/StatisticsChart";
-import RecentOrders from "@/components/ecommerce/RecentOrders";
-import DemographicCard from "@/components/ecommerce/DemographicCard";
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
 
-export default function Ecommerce() {
+export default function Dashboard() {
+  const router = useRouter();
 
+  useEffect(() => {
+    // Redirect to call pipeline page as the default landing page
+    router.push('/callpipeline');
+  }, [router]);
+
+  // Show loading while redirecting
   return (
-    <div className="grid grid-cols-12 gap-4 md:gap-6">
-      <div className="col-span-12 space-y-6 xl:col-span-7">
-        <EcommerceMetrics />
-        <MonthlySalesChart />
-      </div>
-
-      <div className="col-span-12 xl:col-span-5">
-        <MonthlyTarget />
-      </div>
-
-      <div className="col-span-12">
-        <StatisticsChart />
-      </div>
-
-      <div className="col-span-12 xl:col-span-5">
-        <DemographicCard />
-      </div>
-
-      <div className="col-span-12 xl:col-span-7">
-        <RecentOrders />
+    <div className="flex items-center justify-center min-h-[400px]">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600 mx-auto mb-4"></div>
+        <p className="text-gray-500 dark:text-gray-400">Loading...</p>
       </div>
     </div>
   );

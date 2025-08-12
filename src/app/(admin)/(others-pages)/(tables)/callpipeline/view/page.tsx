@@ -60,6 +60,29 @@ interface ContactValue {
   is_primary: boolean;
 }
 
+interface SiteVisitData {
+  site_visit_id: string;
+  call_id: string;
+  property_profile_id: number;
+  property_profile_name: string;
+  staff_id: number;
+  staff_name: string;
+  lead_id: string;
+  lead_name: string;
+  contact_result_id: number;
+  contact_result_name: string;
+  purpose: string;
+  start_datetime: string;
+  end_datetime: string;
+  photo_url: string[];
+  remark: string;
+  is_active: boolean;
+  created_date: string;
+  created_by_name: string;
+  last_update: string | null;
+  updated_by_name: string;
+}
+
 export default function ViewCallPipelinePage() {
   const router = useRouter();
   
@@ -68,6 +91,7 @@ export default function ViewCallPipelinePage() {
   const [activeTab, setActiveTab] = useState<'quickcall' | 'sitevisit'>('quickcall');
   const [pipelineInfo, setPipelineInfo] = useState<PipelineInfo | null>(null);
   const [callLogDetails, setCallLogDetails] = useState<CallLogDetail[]>([]);
+  const [siteVisitData, setSiteVisitData] = useState<SiteVisitData[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [pipelineNotFound, setPipelineNotFound] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
@@ -173,7 +197,6 @@ export default function ViewCallPipelinePage() {
     const urlParams = new URLSearchParams(window.location.search);
     const id = urlParams.get('id') || "";
     console.log("Extracted call log ID from URL query:", id);
-    console.log("Full URL:", window.location.href);
     setCallLogId(id);
   }, []);
 
@@ -262,6 +285,64 @@ export default function ViewCallPipelinePage() {
     };
     
     fetchCallLogData();
+  }, [callLogId]);
+
+  // Fetch site visit data from API
+  useEffect(() => {
+    if (!callLogId) return;
+    
+    const fetchSiteVisitData = async () => {
+      try {
+        const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
+        let baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
+        baseUrl = baseUrl.replace(/\/+$/, "");
+        const endpoint = `${baseUrl}/site-visit/pagination`;
+        const body = {
+          page_number: "1",
+          page_size: "50", // Get more records for site visits
+          search_type: "call_log_id", 
+          query_search: callLogId,
+        };
+        
+        console.log("Making Site Visit API call to:", endpoint);
+        console.log("Site Visit Request body:", body);
+        
+        const res = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(token && { Authorization: `Bearer ${token}` }),
+          },
+          body: JSON.stringify(body),
+        });
+        
+        if (!res.ok) {
+          throw new Error(`HTTP error! status: ${res.status}`);
+        }
+        
+        const data = await res.json();
+        console.log("Site Visit API Response:", data);
+        
+        // Parse the response - handle different possible response structures
+        let siteVisitArr = [];
+        if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
+          siteVisitArr = data[0].data;
+        } else if (Array.isArray(data?.data)) {
+          siteVisitArr = data.data;
+        } else if (Array.isArray(data?.results)) {
+          siteVisitArr = data.results;
+        }
+        
+        console.log("Parsed siteVisitArr:", siteVisitArr);
+        setSiteVisitData(siteVisitArr);
+        
+      } catch (err) {
+        console.error("Site Visit API error:", err);
+        setSiteVisitData([]); // Set empty array on error
+      }
+    };
+    
+    fetchSiteVisitData();
   }, [callLogId]);
 
   const handleEdit = () => {
@@ -463,8 +544,8 @@ export default function ViewCallPipelinePage() {
       {/* Multi-page summary for Quick Call and Site Visit */}
       <ComponentCard title="Pipeline Activity Summary" className="mt-8">
         <div className="mb-4 flex gap-2 border-b border-gray-200 dark:border-white/[0.05]">
-          <button className={`px-4 py-2 text-sm font-medium focus:outline-none ${activeTab === 'quickcall' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300'}`} onClick={() => setActiveTab('quickcall')}>Quick Call</button>
-          <button className={`px-4 py-2 text-sm font-medium focus:outline-none ${activeTab === 'sitevisit' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300'}`} onClick={() => setActiveTab('sitevisit')}>Site Visit</button>
+          <button className={`px-4 py-2 text-sm font-medium focus:outline-none ${activeTab === 'quickcall' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300'}`} onClick={() => setActiveTab('quickcall')}>Call History</button>
+          <button className={`px-4 py-2 text-sm font-medium focus:outline-none ${activeTab === 'sitevisit' ? 'border-b-2 border-blue-600 text-blue-600 dark:text-blue-400' : 'text-gray-600 dark:text-gray-300'}`} onClick={() => setActiveTab('sitevisit')}>Site Visit History</button>
         </div>
         {activeTab === 'quickcall' ? (
           <div>
@@ -542,9 +623,137 @@ export default function ViewCallPipelinePage() {
           </div>
         ) : (
           <div>
-            <div className="py-8 text-center text-gray-500 dark:text-gray-400">
-              Site visit history will be available soon.
-            </div>
+            {siteVisitData && siteVisitData.length > 0 ? (
+              <div className="overflow-x-auto">
+                <table className="min-w-full divide-y divide-gray-200 dark:divide-white/[0.05]">
+                  <thead className="bg-gray-50 dark:bg-white/[0.02]">
+                    <tr>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Visit ID</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Date & Time</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Staff</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Contact Result</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Purpose</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Photos</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Remark</th>
+                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">Actions</th>
+                    </tr>
+                  </thead>
+                  <tbody className="bg-white dark:bg-transparent divide-y divide-gray-200 dark:divide-white/[0.05]">
+                    {siteVisitData.map((visit, index) => {
+                      // Calculate duration if both start and end times exist
+                      let duration = 'N/A';
+                      if (visit.start_datetime && visit.end_datetime) {
+                        try {
+                          const start = new Date(visit.start_datetime);
+                          const end = new Date(visit.end_datetime);
+                          const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+                          if (diffMinutes > 0) {
+                            duration = formatDuration(diffMinutes);
+                          }
+                        } catch {
+                          // Keep 'N/A' if date parsing fails
+                        }
+                      }
+                      
+                      return (
+                        <tr key={visit.site_visit_id || index} className="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900 dark:text-white">
+                            <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-mono font-medium bg-indigo-50 text-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                              {visit.site_visit_id}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                            <div className="flex flex-col">
+                              <span className="font-medium">{formatDate(visit.start_datetime)}</span>
+                              {visit.end_datetime && (
+                                <span className="text-xs text-gray-400">Duration: {duration}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                            <div className="flex items-center">
+                              <div className="flex-shrink-0 h-8 w-8">
+                                <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center">
+                                  <span className="text-xs font-medium text-blue-800 dark:text-blue-300">
+                                    {visit.staff_name?.charAt(0)?.toUpperCase() || 'S'}
+                                  </span>
+                                </div>
+                              </div>
+                              <div className="ml-3">
+                                <p className="text-sm font-medium text-gray-900 dark:text-white">{visit.staff_name || 'Unknown Staff'}</p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400">ID: {visit.staff_id}</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap">
+                            <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${
+                              visit.contact_result_name === 'Completed' ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300' :
+                              visit.contact_result_name === 'Failed' ? 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300' :
+                              visit.contact_result_name === 'Cancelled' ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300' :
+                              'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300'
+                            }`}>
+                              {visit.contact_result_name || 'Unknown'}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-xs">
+                            <div className="truncate" title={visit.purpose || 'No purpose specified'}>
+                              {visit.purpose || 'No purpose specified'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
+                            {visit.photo_url && visit.photo_url.length > 0 ? (
+                              <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-blue-50 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300">
+                                {visit.photo_url.length} photo{visit.photo_url.length !== 1 ? 's' : ''}
+                              </span>
+                            ) : (
+                              <span className="text-gray-400">No photos</span>
+                            )}
+                          </td>
+                          <td className="px-6 py-4 text-sm text-gray-500 dark:text-gray-400 max-w-xs">
+                            <div className="truncate" title={visit.remark || 'No remark'}>
+                              {visit.remark || 'No remark'}
+                            </div>
+                          </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                            <button
+                              onClick={() => router.push(`/callpipeline/sitevisit/edit?pipelineId=${callLogId}&siteVisitId=${visit.site_visit_id}`)}
+                              className="text-indigo-600 hover:text-indigo-900 dark:text-indigo-400 dark:hover:text-indigo-300 mr-3"
+                            >
+                              Edit
+                            </button>
+                            <button
+                              onClick={() => router.push(`/callpipeline/sitevisit/view?siteVisitId=${visit.site_visit_id}&pipelineId=${callLogId}`)}
+                              className="text-blue-600 hover:text-blue-900 dark:text-blue-400 dark:hover:text-blue-300"
+                            >
+                              View
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <div className="py-8 text-center text-gray-500 dark:text-gray-400">
+                <div className="flex flex-col items-center">
+                  <svg className="w-12 h-12 mb-4 text-gray-300 dark:text-gray-600" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                  <p className="text-lg font-medium mb-2">No site visits found</p>
+                  <p className="text-sm mb-4">There are no site visit records for this pipeline yet.</p>
+                  <button
+                    onClick={() => router.push(`/callpipeline/sitevisit/create?pipelineId=${callLogId}`)}
+                    className="inline-flex items-center px-4 py-2 border border-transparent text-sm font-medium rounded-md text-white bg-indigo-600 hover:bg-indigo-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
+                  >
+                    <svg className="w-4 h-4 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                    </svg>
+                    Create First Site Visit
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </ComponentCard>

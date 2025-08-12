@@ -61,7 +61,7 @@ export default function SiteVisitPage() {
   const breadcrumbs = [
     { name: "Home", href: "/" },
     { name: "Call Pipeline", href: "/callpipeline" },
-    { name: "Site Visit" },
+    { name: "Site Visit History" },
   ];
 
   const [pipelineInfo, setPipelineInfo] = useState<PipelineInfo | null>(null);
@@ -272,7 +272,7 @@ export default function SiteVisitPage() {
   });
   const [editErrors, setEditErrors] = useState<SiteVisitFormErrors>({});
 
-  // View modal state
+  // View modal state - Legacy, kept for compatibility
   const [showViewVisitModal, setShowViewVisitModal] = useState(false);
   const [viewingVisitLog, setViewingVisitLog] = useState<SiteVisitEntry | null>(null);
 
@@ -349,8 +349,8 @@ export default function SiteVisitPage() {
   };
 
   const handleViewVisitLog = (log: SiteVisitEntry) => {
-    setViewingVisitLog(log);
-    setShowViewVisitModal(true);
+    // Navigate to the new view page instead of opening a modal
+    router.push(`/callpipeline/sitevisit/view?siteVisitId=${log.siteVisitId}&pipelineId=${pipelineId}`);
   };
 
   const handleDeleteVisitLog = (log: SiteVisitEntry) => {
@@ -535,22 +535,6 @@ export default function SiteVisitPage() {
   const formatTime = (time: string) => {
     if (!time) return "N/A";
     return time;
-  };
-
-  // Calculate visit duration
-  const calculateDuration = (startTime: string, endTime: string) => {
-    if (!startTime || !endTime) return "N/A";
-    const start = new Date(`2000-01-01T${startTime}`);
-    const end = new Date(`2000-01-01T${endTime}`);
-    const diff = end.getTime() - start.getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(minutes / 60);
-    const remainingMinutes = minutes % 60;
-    
-    if (hours > 0) {
-      return `${hours}h ${remainingMinutes}m`;
-    }
-    return `${minutes}m`;
   };
 
   // Show loading or no data if pipeline info is not loaded
@@ -924,29 +908,26 @@ export default function SiteVisitPage() {
                     <Table>
                       <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
                         <TableRow>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-center text-theme-xs dark:text-gray-400">
-                            #
+                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                            Visit ID
                           </TableCell>
                           <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
                             Date & Time
                           </TableCell>
                           <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Duration
+                            Staff
                           </TableCell>
                           <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Status
+                            Contact Result
                           </TableCell>
                           <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Property
+                            Purpose
                           </TableCell>
                           <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Visit Type
+                            Photos
                           </TableCell>
                           <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Attendees
-                          </TableCell>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Last Update
+                            Remark
                           </TableCell>
                           <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
                             Actions
@@ -954,67 +935,123 @@ export default function SiteVisitPage() {
                         </TableRow>
                       </TableHeader>
                       <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
-                        {currentVisitHistory.map((visit) => (
-                          <TableRow key={`${visit.visitPipelineID}-${visit.visitLogOrderID}`}>
-                            <TableCell className="px-5 py-4 text-center">
-                              <span className="font-mono text-sm text-gray-600 dark:text-gray-300 bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded">
-                                {visit.visitLogOrderID}
-                              </span>
-                            </TableCell>
-                            <TableCell className="px-5 py-4">
-                              <div>
-                                <div className="font-medium text-gray-800 dark:text-white text-sm">
-                                  {visit.visitDate}
+                        {currentVisitHistory.map((visit) => {
+                          // Calculate duration if both start and end times exist
+                          let duration = 'N/A';
+                          if (visit.visitStartTime && visit.visitEndTime) {
+                            try {
+                              const start = new Date(`2000-01-01T${visit.visitStartTime}`);
+                              const end = new Date(`2000-01-01T${visit.visitEndTime}`);
+                              const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+                              if (diffMinutes > 0) {
+                                const hours = Math.floor(diffMinutes / 60);
+                                const remainingMinutes = diffMinutes % 60;
+                                duration = hours > 0 ? `${hours}h ${remainingMinutes}m` : `${diffMinutes}m`;
+                              }
+                            } catch {
+                              // Keep 'N/A' if calculation fails
+                            }
+                          }
+
+                          return (
+                            <TableRow key={`${visit.visitPipelineID}-${visit.visitLogOrderID}`}>
+                              {/* Visit ID */}
+                              <TableCell className="px-5 py-4">
+                                <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-mono font-medium bg-indigo-50 text-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
+                                  {visit.siteVisitId || `SV-${visit.visitLogOrderID}`}
+                                </span>
+                              </TableCell>
+                              
+                              {/* Date & Time */}
+                              <TableCell className="px-5 py-4">
+                                <div className="flex flex-col">
+                                  <span className="font-medium text-gray-800 dark:text-white text-sm">
+                                    {visit.visitDate}
+                                  </span>
+                                  <span className="text-xs text-gray-400">
+                                    {formatTime(visit.visitStartTime)} - {formatTime(visit.visitEndTime)}
+                                  </span>
+                                  {duration !== 'N/A' && (
+                                    <span className="text-xs text-gray-400">Duration: {duration}</span>
+                                  )}
                                 </div>
-                                <div className="text-gray-500 dark:text-gray-400 text-xs">
-                                  {formatTime(visit.visitStartTime)} - {formatTime(visit.visitEndTime)}
+                              </TableCell>
+                              
+                              {/* Staff */}
+                              <TableCell className="px-5 py-4">
+                                <div className="flex items-center">
+                                  <div className="flex-shrink-0 h-8 w-8">
+                                    <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center">
+                                      <span className="text-xs font-medium text-blue-800 dark:text-blue-300">
+                                        {visit.attendees?.split(',')[0]?.trim()?.charAt(0)?.toUpperCase() || 'S'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                  <div className="ml-3">
+                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                      {visit.attendees?.split(',')[0]?.trim() || 'Unknown Staff'}
+                                    </p>
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      Pipeline: {visit.visitPipelineID}
+                                    </p>
+                                  </div>
                                 </div>
-                              </div>
-                            </TableCell>
-                            <TableCell className="px-5 py-4 text-gray-500 text-sm dark:text-gray-400">
-                              {calculateDuration(visit.visitStartTime, visit.visitEndTime)}
-                            </TableCell>
-                            <TableCell className="px-5 py-4">
-                              <Badge
-                                size="sm"
-                                color={
-                                  visit.visitStatus === "Completed"
-                                    ? "success"
-                                    : visit.visitStatus === "No Show" || visit.visitStatus === "Cancelled"
-                                    ? "error"
-                                    : visit.visitStatus === "Postponed" || visit.visitStatus === "Scheduled"
-                                    ? "warning"
-                                    : "info"
-                                }
-                              >
-                                {visit.visitStatus}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="px-5 py-4">
-                              <div className="max-w-xs text-sm text-gray-600 dark:text-gray-300 truncate" title={visit.propertyProfileName}>
-                                {visit.propertyProfileName || 'N/A'}
-                              </div>
-                            </TableCell>
-                            <TableCell className="px-5 py-4">
-                              <span className="text-sm text-gray-600 dark:text-gray-300">
-                                {visit.visitType}
-                              </span>
-                            </TableCell>
-                            <TableCell className="px-5 py-4">
-                              <div className="max-w-xs text-sm text-gray-600 dark:text-gray-300 truncate">
-                                {visit.attendees}
-                              </div>
-                            </TableCell>
-                            <TableCell className="px-5 py-4">
-                              <div className="text-sm text-gray-600 dark:text-gray-300">
-                                {visit.lastUpdate || 'Never'}
-                              </div>
-                            </TableCell>
-                            <TableCell className="px-4 py-3 text-start">
-                              <ActionMenu visitLog={visit} onSelect={handleActionSelect} />
-                            </TableCell>
-                          </TableRow>
-                        ))}
+                              </TableCell>
+                              
+                              {/* Contact Result */}
+                              <TableCell className="px-5 py-4">
+                                <Badge
+                                  size="sm"
+                                  color={
+                                    visit.visitStatus === "Completed"
+                                      ? "success"
+                                      : visit.visitStatus === "No Show" || visit.visitStatus === "Cancelled"
+                                      ? "error"
+                                      : visit.visitStatus === "Postponed" || visit.visitStatus === "Scheduled"
+                                      ? "warning"
+                                      : "info"
+                                  }
+                                >
+                                  {visit.contactResultName || visit.visitStatus}
+                                </Badge>
+                              </TableCell>
+                              
+                              {/* Purpose */}
+                              <TableCell className="px-5 py-4">
+                                <div className="max-w-xs text-sm text-gray-600 dark:text-gray-300 truncate" title={visit.visitType}>
+                                  {visit.visitType}
+                                </div>
+                              </TableCell>
+                              
+                              {/* Photos */}
+                              <TableCell className="px-5 py-4">
+                                <div className="flex items-center space-x-2">
+                                  {visit.photoUrls && visit.photoUrls.length > 0 ? (
+                                    <>
+                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300">
+                                        {visit.photoUrls.length} photo{visit.photoUrls.length > 1 ? 's' : ''}
+                                      </span>
+                                    </>
+                                  ) : (
+                                    <span className="text-xs text-gray-400">No photos</span>
+                                  )}
+                                </div>
+                              </TableCell>
+                              
+                              {/* Remark */}
+                              <TableCell className="px-5 py-4">
+                                <div className="max-w-xs text-sm text-gray-600 dark:text-gray-300 truncate" title={visit.notes}>
+                                  {visit.notes || 'No remark'}
+                                </div>
+                              </TableCell>
+                              
+                              {/* Actions */}
+                              <TableCell className="px-4 py-3 text-start">
+                                <ActionMenu visitLog={visit} onSelect={handleActionSelect} />
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
                       </TableBody>
                     </Table>
                   </div>

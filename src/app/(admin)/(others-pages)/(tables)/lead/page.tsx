@@ -101,7 +101,7 @@ export default function LeadsPage() {
       </div>
 
       <div className="space-y-6">
-        <ComponentCard title="Leads">
+        <ComponentCard title="Leads Management">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="flex items-center gap-3">
               <Link href="/lead/create">

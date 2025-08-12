@@ -8,8 +8,10 @@ import Label from "@/components/form/Label";
 import Input from "@/components/form/input/InputField";
 import TextArea from "@/components/form/input/TextArea";
 import Select from "@/components/form/Select";
-import { Modal } from "@/components/ui/modal";
 import Address, { IAddress } from "@/components/form/Address";
+import PhotoUpload, { PhotoFile } from "@/components/form/PhotoUpload";
+import SuccessModal from "@/components/ui/modal/SuccessModal";
+import api from "@/lib/api";
 
 const breadcrumbs = [
   { name: "Home", href: "/" },
@@ -32,11 +34,11 @@ interface FormData {
   Features: string;
   Bedrooms: string;
   Bathrooms: string;
-  Area: string;
   YearBuilt: string;
   Project: ISelectOption | null;
   Width: string;
   Length: string;
+  photo_url?: string[];
 }
 
 interface FormErrors {
@@ -49,7 +51,6 @@ interface FormErrors {
   Features?: string;
   Bedrooms?: string;
   Bathrooms?: string;
-  Area?: string;
   YearBuilt?: string;
   Project?: string;
   Width?: string;
@@ -60,7 +61,6 @@ export default function CreatePropertyPage() {
   const router = useRouter();
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [savedProfileId, setSavedProfileId] = useState<string | null>(null);
   
   const [formData, setFormData] = useState<FormData>({
     PropertyName: "",
@@ -79,7 +79,6 @@ export default function CreatePropertyPage() {
     Features: "",
     Bedrooms: "",
     Bathrooms: "",
-    Area: "",
     YearBuilt: "",
     Project: null,
     Width: "",
@@ -88,6 +87,7 @@ export default function CreatePropertyPage() {
   // Project Options (fetched from API)
   const [projectOptions, setProjectOptions] = useState<ISelectOption[]>([]);
   const [propertyTypeOptions, setPropertyTypeOptions] = useState<ISelectOption[]>([]);
+  const [statusOptions, setStatusOptions] = useState<ISelectOption[]>([]);
   React.useEffect(() => {
     async function fetchDropdowns() {
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
@@ -129,21 +129,29 @@ export default function CreatePropertyPage() {
         console.error("Property Type API error:", err);
         setPropertyTypeOptions([]);
       }
+      // Fetch property status options
+      try {
+        const response = await fetch(`${apiBase}/property-status/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ page_number: "1", page_size: "100" })
+        });
+        const data = await response.json();
+        console.log("Property Status API response:", data);
+        const apiResult = data[0];
+        if (apiResult && apiResult.data) {
+          setStatusOptions(apiResult.data.map((status: { property_status_id: number, property_status_name: string }) => ({ value: status.property_status_id.toString(), label: status.property_status_name })));
+        }
+      } catch (err) {
+        console.error("Property Status API error:", err);
+        setStatusOptions([]);
+      }
     }
     fetchDropdowns();
   }, []);
   
   const [errors, setErrors] = useState<FormErrors>({});
-
-
-  // Status Options
-  const statusOptions: ISelectOption[] = [
-    { value: "Available", label: "Available" },
-    { value: "Reserved", label: "Reserved" },
-    { value: "Sold", label: "Sold" },
-    { value: "Under Construction", label: "Under Construction" },
-    { value: "Maintenance", label: "Maintenance" },
-  ];
+  const [photos, setPhotos] = useState<PhotoFile[]>([]);
 
   const handleChange = (field: keyof FormData, value: string | boolean | ISelectOption | null | IAddress) => {
     console.log("Property form handleChange:", field, value);
@@ -209,10 +217,6 @@ export default function CreatePropertyPage() {
     if (formData.Bathrooms && (isNaN(Number(formData.Bathrooms)) || Number(formData.Bathrooms) < 0)) {
       newErrors.Bathrooms = "Bathrooms must be a non-negative number";
     }
-    // Area
-    if (formData.Area && (isNaN(Number(formData.Area)) || Number(formData.Area) < 0)) {
-      newErrors.Area = "Area must be a non-negative number";
-    }
     // Year Built
     if (formData.YearBuilt && (isNaN(Number(formData.YearBuilt)) || Number(formData.YearBuilt) < 1800 || Number(formData.YearBuilt) > new Date().getFullYear())) {
       newErrors.YearBuilt = `Year built must be between 1800 and ${new Date().getFullYear()}`;
@@ -229,6 +233,49 @@ export default function CreatePropertyPage() {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Photo handlers
+  const handlePhotosChange = (newPhotos: PhotoFile[]) => {
+    setPhotos(newPhotos);
+  };
+
+  const uploadMultiplePhotosToStorage = async (photos: PhotoFile[]): Promise<string[]> => {
+    if (photos.length === 0) {
+      return [];
+    }
+
+    const formData = new FormData();
+    
+    // Add each photo file to the FormData
+    photos.forEach((photo) => {
+      if (photo.file) {
+        formData.append('photo', photo.file);
+      }
+    });
+    
+    // Add metadata
+    formData.append('menu', 'property_profile');
+    formData.append('photoId', ''); // Empty for new property
+
+    try {
+      const uploadResponse = await api.post('/files/upload-multiple-photos', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      
+      console.log('Multiple upload response:', uploadResponse.data);
+      
+      // Extract the imageUrls array from the response
+      const imageUrls = uploadResponse.data.imageUrls;
+      if (!imageUrls || !Array.isArray(imageUrls)) {
+        throw new Error('No imageUrls array returned from upload response');
+      }
+      
+      return imageUrls;
+    } catch (error) {
+      console.error('Error uploading multiple photos:', error);
+      throw error;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) {
@@ -236,16 +283,51 @@ export default function CreatePropertyPage() {
     }
     setIsSubmitting(true);
     try {
-      // Build payload for API
+      // Upload photos first if any exist
+      let photoUrls: string[] = [];
+      if (photos.length > 0) {
+        console.log("Uploading photos before creating property...");
+        try {
+          // Filter out photos without files
+          const photosWithFiles = photos.filter(photo => photo.file);
+          
+          if (photosWithFiles.length > 0) {
+            console.log(`Uploading ${photosWithFiles.length} photos in batch`);
+            photoUrls = await uploadMultiplePhotosToStorage(photosWithFiles);
+            console.log('Successfully uploaded photos, URLs:', photoUrls);
+          }
+        } catch (uploadError) {
+          console.error("Error uploading photos:", uploadError);
+          alert("Failed to upload photos. Please try again.");
+          setIsSubmitting(false);
+          return;
+        }
+      }
+
+      // Build payload for API - Updated to match expected PUT request structure
+      // Ensure we get the correct status ID
+      let statusId = "";
+      if (formData.Status) {
+        // If Status.value exists, use it; otherwise find the ID from statusOptions
+        if (formData.Status.value) {
+          statusId = String(formData.Status.value);
+        } else if (formData.Status.label) {
+          // Fallback: find the ID by matching the label
+          const statusOption = statusOptions.find(opt => opt.label === formData.Status?.label);
+          statusId = statusOption ? String(statusOption.value) : "";
+        }
+      }
+      
       const payload = {
         property_type_id: String(formData.PropertyType?.value || ""),
         project_id: String(formData.Project?.value || ""),
-        project_owner_id: "3", // TODO: Replace with actual owner selection if needed
+        project_owner_id: "5", // Hard-coded to 5 as requested
+        property_status_id: statusId,
         village_id: String(formData.Location.village?.value || ""),
         property_profile_name: String(formData.PropertyName || ""),
         home_number: String(formData.Location.homeAddress || ""),
-        room_number: String(formData.Bedrooms || ""),
-        address: String(formData.Location.province?.label || ""),
+        room_number: String(formData.Location.homeAddress || ""), // Use same as home_number for now
+        address: String(formData.Location.province?.label + " " + formData.Location.district?.label + " " + formData.Location.commune?.label).trim() || String(formData.Location.homeAddress || ""),
         width: String(formData.Width || ""),
         length: String(formData.Length || ""),
         price: String(formData.Price || ""),
@@ -254,32 +336,84 @@ export default function CreatePropertyPage() {
         year_built: String(formData.YearBuilt || ""),
         description: String(formData.Description || ""),
         feature: String(formData.Features || ""),
+        photo_url: photoUrls // Use the uploaded photo URLs
       };
-      console.log("Property Create Payload:", payload);
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const response = await fetch(`${apiBase}/property-profile/create`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload)
-      });
-      if (response.ok) {
-        // Try to get the new profile id from the response
-        let newId: string | null = null;
-        try {
-          const resData = await response.json();
-          // Try common patterns for id
-          newId = resData?.property_profile_id || resData?.id || resData?.data?.property_profile_id || null;
-        } catch {}
-        setSavedProfileId(newId);
-        setShowSuccessModal(true);
-      } else {
-        throw new Error("Failed to create property");
+      
+      // Debug logging for form data values
+      console.log("Form Data Status:", formData.Status);
+      console.log("Status ID extracted:", statusId);
+      console.log("Property Create Payload:", JSON.stringify(payload, null, 2));
+      console.log("Photo URLs count:", photoUrls.length);
+      console.log("Photo URLs:", photoUrls);
+      console.log('API Base URL:', process.env.NEXT_PUBLIC_API_BASE_URL);
+      console.log('Endpoint: /property-profile/create');
+      console.log('Project Owner ID: hardcoded to "5"');
+      
+      // Validate required fields
+      const requiredFields = ['property_type_id', 'project_id', 'property_status_id', 'village_id', 'property_profile_name'];
+      const missingFields = requiredFields.filter(field => !payload[field as keyof typeof payload]);
+      if (missingFields.length > 0) {
+        console.error('Missing required fields:', missingFields);
+        alert(`Missing required fields: ${missingFields.join(', ')}`);
+        setIsSubmitting(false);
+        return;
       }
-    } catch (error) {
+      
+      // Use api client instead of fetch for better authentication handling
+      const response = await api.post('/property-profile/create', payload);
+      
+      console.log('Create property response status:', response.status);
+      console.log('Create property response data:', response.data);
+      
+      // Only treat status 200 as success
+      if (response.status === 200) {
+        console.log('Create property success response:', response.data);
+        setShowSuccessModal(true);
+      } else if (response.status === 400) {
+        // Bad request - client error
+        const errorMessage = response.data?.message || 'Bad request. Please check your input and try again.';
+        console.error('Create property 400 error:', errorMessage);
+        alert(`Error: ${errorMessage}`);
+        setIsSubmitting(false);
+        return; // Don't redirect
+      } else if (response.status === 500 || response.status === 501) {
+        // Server errors
+        const errorMessage = response.data?.message || 'Server error. Please try again later.';
+        console.error('Create property server error:', response.status, errorMessage);
+        alert(`Server Error (${response.status}): ${errorMessage}`);
+        setIsSubmitting(false);
+        return; // Don't redirect
+      } else {
+        // Any other non-200 status is treated as error
+        const errorMessage = response.data?.message || `Unexpected response status: ${response.status}`;
+        console.error('Create property unexpected status:', response.status, errorMessage);
+        alert(`Error (${response.status}): ${errorMessage}`);
+        setIsSubmitting(false);
+        return; // Don't redirect
+      }
+    } catch (error: any) {
       console.error('Error creating property:', error);
+      
+      // Handle different types of errors
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        const status = error.response.status;
+        const errorMessage = error.response.data?.message || error.message || 'Unknown error occurred';
+        
+        if (status === 400) {
+          alert(`Bad Request: ${errorMessage}`);
+        } else if (status === 500 || status === 501) {
+          alert(`Server Error (${status}): ${errorMessage}`);
+        } else {
+          alert(`Error (${status}): ${errorMessage}`);
+        }
+      } else if (error.request) {
+        // The request was made but no response was received
+        alert("Network error: Unable to reach the server. Please check your internet connection.");
+      } else {
+        // Something happened in setting up the request
+        alert(`Request error: ${error.message || 'Failed to create property. Please try again.'}`);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -419,20 +553,6 @@ export default function CreatePropertyPage() {
                 )}
               </div>
               <div>
-                <Label htmlFor="Area">Area (sq ft)</Label>
-                <Input
-                  id="Area"
-                  type="text"
-                  value={formData.Area}
-                  onChange={(e) => handleChange('Area', e.target.value)}
-                  placeholder="Enter area in square feet"
-                  className={errors.Area ? 'border-red-500' : ''}
-                />
-                {errors.Area && (
-                  <p className="mt-1 text-sm text-red-500">{errors.Area}</p>
-                )}
-              </div>
-              <div>
                 <Label htmlFor="Bedrooms">Bedrooms</Label>
                 <Input
                   id="Bedrooms"
@@ -510,6 +630,15 @@ export default function CreatePropertyPage() {
             </div>
           </div>
 
+          {/* Property Photos */}
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+            <h4 className="mb-4 text-base font-semibold text-gray-800 dark:text-white/90">Property Photos</h4>
+            <PhotoUpload
+              photos={photos}
+              onPhotosChange={handlePhotosChange}
+            />
+          </div>
+
           <div className="flex justify-end gap-4 pt-6 border-t">
             <Button
               type="button"
@@ -530,35 +659,13 @@ export default function CreatePropertyPage() {
       </ComponentCard>
 
       {/* Success Modal */}
-      <Modal isOpen={showSuccessModal} onClose={handleSuccessModalClose}>
-        <div className="p-6 text-center max-w-md mx-auto">
-          <div className="flex items-center justify-center w-14 h-14 mx-auto mb-4 bg-green-100 rounded-full dark:bg-green-900/20">
-            <svg className="w-7 h-7 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h3 className="mb-2 text-xl font-bold text-gray-900 dark:text-white">
-            Property Profile Created!
-          </h3>
-          <p className="mb-2 text-gray-700 dark:text-gray-300">
-            The property profile has been successfully added to the system.
-          </p>
-          {savedProfileId && (
-            <div className="mb-4">
-              <span className="block text-sm text-gray-500 dark:text-gray-400">Profile ID:</span>
-              <span className="text-lg font-semibold text-green-700 dark:text-green-400">{savedProfileId}</span>
-            </div>
-          )}
-          <p className="mb-4 text-gray-600 dark:text-gray-400">
-            You can now view or manage this property profile in the property list.
-          </p>
-          <div className="flex justify-center">
-            <Button onClick={handleSuccessModalClose} className="px-6 py-2 rounded-lg">
-              Back to Property List
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={handleSuccessModalClose}
+        title="Property Profile Created!"
+        message="The property profile has been successfully added to the system."
+        confirmButtonText="Back to Property List"
+      />
     </div>
   );
 }

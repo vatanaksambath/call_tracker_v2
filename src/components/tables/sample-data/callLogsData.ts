@@ -9,13 +9,27 @@ export interface CallLog {
   last_update: string;
   lead_id: string;
   lead_name: string;
+  phone_number?: string;  // Added for phone number display
   property_profile_id: number;
   property_profile_name: string | null;
+  property_profile_price?: number;  // Added for property price
+  property_type?: string;   // Added for property type
+  property_type_name?: string;   // Added for property type name
   purpose: string;
+  status?: string;  // Added for status text
   status_id: number;
   total_call: number;
   total_site_visit: number;
   updated_by_name: string;
+  current_staff_id?: string;  // Added for staff ID
+  call_log_details?: Array<{
+    contact_data?: Array<{
+      contact_values?: Array<{
+        contact_number?: string;
+        is_primary?: boolean;
+      }>;
+    }>;
+  }>;
 }
 
 // Mock data for call logs - used for development and testing

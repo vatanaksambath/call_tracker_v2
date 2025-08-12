@@ -78,7 +78,7 @@ export default function SignInForm() {
         localStorage.setItem('token', receivedToken);
         setToken(receivedToken);
 
-        router.push('/');
+        router.push('/callpipeline');
       } else {
         setLoginError(message || 'Login successful, but no token received from API.');
       }

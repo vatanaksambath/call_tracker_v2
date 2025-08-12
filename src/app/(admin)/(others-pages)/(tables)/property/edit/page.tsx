@@ -9,8 +9,11 @@ import Label from "@/components/form/Label";
 import Input from "@/components/form/input/InputField";
 import TextArea from "@/components/form/input/TextArea";
 import Select from "@/components/form/Select";
-import { Modal } from "@/components/ui/modal";
 import Address, { IAddress } from "@/components/form/Address";
+import PhotoUpload, { PhotoFile } from "@/components/form/PhotoUpload";
+import SuccessModal from "@/components/ui/modal/SuccessModal";
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
+import api from "@/lib/api";
 
 const breadcrumbs = [
   { name: "Home", href: "/" },
@@ -39,8 +42,8 @@ interface FormData {
   YearBuilt: string;
   Width: string;
   Length: string;
-  Area: string;
   Status: ISelectOption | null;
+  photo_url?: string[];
 }
 
 interface FormErrors {
@@ -58,35 +61,6 @@ interface FormErrors {
   Length?: string;
 }
 
-interface FormData {
-  PropertyName: string;
-  Location: IAddress;
-  PropertyType: ISelectOption | null;
-  Status: ISelectOption | null;
-  Price: string;
-  Description: string;
-  Features: string;
-  Bedrooms: string;
-  Bathrooms: string;
-  Area: string;
-  YearBuilt: string;
-}
-
-interface FormErrors {
-  PropertyName?: string;
-  Location?: string;
-  PropertyType?: string;
-  Price?: string;
-  Status?: string;
-  Description?: string;
-  Features?: string;
-  Bedrooms?: string;
-  Bathrooms?: string;
-  Area?: string;
-  YearBuilt?: string;
-}
-
-
 export default function EditPropertyPage() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -101,18 +75,13 @@ export default function EditPropertyPage() {
   const [projectOptions, setProjectOptions] = useState<ISelectOption[]>([]);
   const [propertyTypeOptions, setPropertyTypeOptions] = useState<ISelectOption[]>([]);
   const [projectOwnerOptions, setProjectOwnerOptions] = useState<ISelectOption[]>([]);
-
-  // Status Options
-  const statusOptions: ISelectOption[] = [
-    { value: "Available", label: "Available" },
-    { value: "Reserved", label: "Reserved" },
-    { value: "Sold", label: "Sold" },
-    { value: "Under Construction", label: "Under Construction" },
-    { value: "Maintenance", label: "Maintenance" },
-  ];
+  const [statusOptions, setStatusOptions] = useState<ISelectOption[]>([]);
+  const [photos, setPhotos] = useState<PhotoFile[]>([]);
 
   // Fetch dropdowns and property data
   useEffect(() => {
+    let isMounted = true;
+    
     async function fetchDropdownsAndData() {
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
@@ -128,7 +97,7 @@ export default function EditPropertyPage() {
         });
         const data = await res.json();
         const apiResult = data[0];
-        if (apiResult && apiResult.data) {
+        if (apiResult && apiResult.data && isMounted) {
           setProjectOptions(apiResult.data.map((proj: unknown) => {
             const p = proj as Record<string, unknown>;
             return { value: String(p.project_id), label: p.project_name as string };
@@ -144,7 +113,7 @@ export default function EditPropertyPage() {
         });
         const data = await res.json();
         const apiResult = data[0];
-        if (apiResult && apiResult.data) {
+        if (apiResult && apiResult.data && isMounted) {
           setPropertyTypeOptions(apiResult.data.map((type: unknown) => {
             const t = type as Record<string, unknown>;
             return { value: String(t.property_type_id), label: t.property_type_name as string };
@@ -160,7 +129,7 @@ export default function EditPropertyPage() {
         });
         const data = await res.json();
         const apiResult = data[0];
-        if (apiResult && apiResult.data) {
+        if (apiResult && apiResult.data && isMounted) {
           setProjectOwnerOptions(apiResult.data.map((owner: unknown) => {
             const o = owner as Record<string, unknown>;
             return { value: String(o.project_owner_id), label: o.project_owner_name as string };
@@ -168,10 +137,30 @@ export default function EditPropertyPage() {
         }
       } catch {}
 
+      // Fetch property status options
+      try {
+        const response = await fetch(`${apiBase}/property-status/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ page_number: "1", page_size: "100" })
+        });
+        const data = await response.json();
+        console.log("Property Status API response:", data);
+        const apiResult = data[0];
+        if (apiResult && apiResult.data && isMounted) {
+          setStatusOptions(apiResult.data.map((status: { property_status_id: number, property_status_name: string }) => ({ value: status.property_status_id.toString(), label: status.property_status_name })));
+        }
+      } catch (err) {
+        console.error("Property Status API error:", err);
+        setStatusOptions([]);
+      }
+
       // Fetch property data
       if (!propertyId) {
-        setNotFound(true);
-        setLoading(false);
+        if (isMounted) {
+          setNotFound(true);
+          setLoading(false);
+        }
         return;
       }
       try {
@@ -183,43 +172,64 @@ export default function EditPropertyPage() {
         const data = await res.json();
         const apiResult = data[0];
         if (!apiResult || !apiResult.data || !apiResult.data[0]) {
-          setNotFound(true);
-          setLoading(false);
+          if (isMounted) {
+            setNotFound(true);
+            setLoading(false);
+          }
           return;
         }
         const prop = apiResult.data[0];
-        setFormData({
-          property_profile_id: String(prop.property_profile_id),
-          PropertyName: prop.property_profile_name || '',
-          Location: {
-            province: prop.province_id ? { value: String(prop.province_id), label: prop.province_name } : null,
-            district: prop.district_id ? { value: String(prop.district_id), label: prop.district_name } : null,
-            commune: prop.commune_id ? { value: String(prop.commune_id), label: prop.commune_name } : null,
-            village: prop.village_id ? { value: String(prop.village_id), label: prop.village_name } : null,
-            homeAddress: prop.home_number || '',
-            streetAddress: prop.street_address || '',
-          },
-          PropertyType: prop.property_type_id ? { value: String(prop.property_type_id), label: prop.property_type_name } : null,
-          Project: prop.project_id ? { value: String(prop.project_id), label: prop.project_name } : null,
-          ProjectOwner: prop.project_owner_id ? { value: String(prop.project_owner_id), label: prop.project_owner_name } : null,
-          Price: prop.price ? String(prop.price) : '',
-          Description: prop.description || '',
-          Features: prop.feature || '',
-          Bedrooms: prop.bedroom ? String(prop.bedroom) : '',
-          Bathrooms: prop.bathroom ? String(prop.bathroom) : '',
-          YearBuilt: prop.year_built ? String(prop.year_built) : '',
-          Width: prop.width ? String(prop.width) : '',
-          Length: prop.length ? String(prop.length) : '',
-          Area: prop.area ? String(prop.area) : '',
-          Status: prop.is_active ? { value: "Available", label: "Available" } : null,
-        });
-        setLoading(false);
+        if (isMounted) {
+          setFormData({
+            property_profile_id: String(prop.property_profile_id),
+            PropertyName: prop.property_profile_name || '',
+            Location: {
+              province: prop.province_id ? { value: String(prop.province_id), label: prop.province_name } : null,
+              district: prop.district_id ? { value: String(prop.district_id), label: prop.district_name } : null,
+              commune: prop.commune_id ? { value: String(prop.commune_id), label: prop.commune_name } : null,
+              village: prop.village_id ? { value: String(prop.village_id), label: prop.village_name } : null,
+              homeAddress: prop.home_number || '',
+              streetAddress: prop.street_address || '',
+            },
+            PropertyType: prop.property_type_id ? { value: String(prop.property_type_id), label: prop.property_type_name } : null,
+            Project: prop.project_id ? { value: String(prop.project_id), label: prop.project_name } : null,
+            ProjectOwner: prop.project_owner_id ? { value: String(prop.project_owner_id), label: prop.project_owner_name } : null,
+            Price: prop.price ? String(prop.price) : '',
+            Description: prop.description || '',
+            Features: prop.feature || '',
+            Bedrooms: prop.bedroom ? String(prop.bedroom) : '',
+            Bathrooms: prop.bathroom ? String(prop.bathroom) : '',
+            YearBuilt: prop.year_built ? String(prop.year_built) : '',
+            Width: prop.width ? String(prop.width) : '',
+            Length: prop.length ? String(prop.length) : '',
+            Status: prop.property_status_id ? { value: String(prop.property_status_id), label: prop.property_status_name || 'Unknown' } : null,
+            photo_url: prop.photo_url || [],
+          });
+
+          // Convert existing photo URLs to PhotoFile objects
+          if (prop.photo_url && Array.isArray(prop.photo_url)) {
+            const existingPhotos: PhotoFile[] = prop.photo_url.map((url: string, index: number) => ({
+              id: `existing-${index}`,
+              file: null,
+              preview: url,
+              name: `Photo ${index + 1}`,
+              size: 0,
+              isExisting: true,
+            }));
+            setPhotos(existingPhotos);
+          }
+          // Set loading to false only after all data is loaded and ready to render
+          setLoading(false);
+        }
       } catch {
-        setNotFound(true);
-        setLoading(false);
+        if (isMounted) {
+          setNotFound(true);
+          setLoading(false);
+        }
       }
     }
     fetchDropdownsAndData();
+    return () => { isMounted = false; };
   }, [propertyId]);
 
 
@@ -249,25 +259,106 @@ export default function EditPropertyPage() {
     return Object.keys(errors).length === 0;
   };
 
+  // Photo handlers
+  const handlePhotosChange = (newPhotos: PhotoFile[]) => {
+    setPhotos(newPhotos);
+  };
+
+  const uploadMultiplePhotosToStorage = async (photoFiles: PhotoFile[]): Promise<string[]> => {
+    if (photoFiles.length === 0) {
+      return [];
+    }
+
+    const photoFormData = new FormData();
+    
+    // Append all photo files
+    photoFiles.forEach((photo) => {
+      if (photo.file) {
+        photoFormData.append('photo', photo.file);
+      }
+    });
+    
+    // Append menu and photoId once
+    photoFormData.append('menu', 'property_profile');
+    photoFormData.append('photoId', String(formData?.property_profile_id || ''));
+
+    try {
+      const uploadResponse = await api.post('/files/upload-multiple-photos', photoFormData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      
+      console.log('Multiple photos upload response:', uploadResponse.data);
+      
+      // Extract the imageUrls array from the response
+      const imageUrls = uploadResponse.data.imageUrls;
+      if (!imageUrls || !Array.isArray(imageUrls)) {
+        throw new Error('No imageUrls array returned from upload response');
+      }
+      
+      console.log('Extracted imageUrls:', imageUrls);
+      return imageUrls;
+    } catch (error) {
+      console.error('Error uploading multiple photos:', error);
+      throw error;
+    }
+  };
+
+  const handleSuccessModalClose = () => {
+    setShowSuccessModal(false);
+    router.push('/property');
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validate() || !formData) return;
     setIsSubmitting(true);
+    
     try {
+      // Process photos similar to site visit edit page
+      const existingPhotos = photos
+        .filter(photo => photo.isExisting)
+        .map(photo => photo.preview);
+      
+      const newPhotoFiles = photos.filter(photo => !photo.isExisting && photo.file);
+      
+      console.log('Existing photos:', existingPhotos);
+      console.log('New photo files to upload:', newPhotoFiles.length);
+      
+      const photoUrls = [...existingPhotos];
+      
+      // Upload new photos if any
+      if (newPhotoFiles.length > 0) {
+        console.log("Uploading new photos:", newPhotoFiles.length);
+        try {
+          // Upload all new photos at once using the multiple photos endpoint
+          const uploadedUrls = await uploadMultiplePhotosToStorage(newPhotoFiles);
+          photoUrls.push(...uploadedUrls);
+          console.log("Successfully uploaded photos, URLs:", uploadedUrls);
+          console.log('Final photo URLs array:', photoUrls);
+        } catch (uploadError) {
+          console.error("Error uploading photos:", uploadError);
+          alert("Error uploading photos. Please try again.");
+          setIsSubmitting(false);
+          return;
+        }
+      }
+      
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
+      
       const payload = {
         property_profile_id: String(formData.property_profile_id),
         property_type_id: String(formData.PropertyType?.value || ""),
         project_id: String(formData.Project?.value || ""),
-        project_owner_id: String(formData.ProjectOwner?.value || ""),
+        project_owner_id: "5", // Hard-coded to 5 as requested (same as create page)
+        property_status_id: String(formData.Status?.value || "1"),
         village_id: String(formData.Location.village?.value || ""),
         property_profile_name: String(formData.PropertyName || ""),
         home_number: String(formData.Location.homeAddress || ""),
-        room_number: String(formData.Bedrooms || ""),
-        address: String(formData.Location.province?.label || ""),
+        room_number: String(formData.Location.homeAddress || ""), // Use same as home_number for consistency
+        address: String(formData.Location.province?.label + " " + formData.Location.district?.label + " " + formData.Location.commune?.label).trim() || String(formData.Location.homeAddress || ""),
         width: String(formData.Width || ""),
         length: String(formData.Length || ""),
         price: String(formData.Price || ""),
@@ -276,22 +367,71 @@ export default function EditPropertyPage() {
         year_built: String(formData.YearBuilt || ""),
         description: String(formData.Description || ""),
         feature: String(formData.Features || ""),
+        photo_url: photoUrls, // Use the uploaded photo URLs
         is_active: true
       };
-      const bodyString = JSON.stringify(payload);
-      console.log("Property Update Payload (JSON string):", bodyString);
-      const response = await fetch(`${apiBase}/property-profile/update`, {
-        method: "POST",
-        headers,
-        body: bodyString
-      });
-      if (response.ok) {
+      
+      console.log("Property Update Payload before PUT request:");
+      console.log(JSON.stringify(payload, null, 2));
+      console.log('API Base URL:', process.env.NEXT_PUBLIC_API_BASE_URL);
+      console.log('Endpoint: /property-profile/update');
+      console.log('Project Owner ID: hardcoded to "5"');
+      
+      // Use api client instead of fetch for better authentication handling
+      const response = await api.put('/property-profile/update', payload);
+      
+      console.log('Update property response status:', response.status);
+      console.log('Update property response data:', response.data);
+      
+      // Only treat status 200 as success
+      if (response.status === 200) {
+        console.log('Update property success response:', response.data);
         setShowSuccessModal(true);
+      } else if (response.status === 400) {
+        // Bad request - client error
+        const errorMessage = response.data?.message || 'Bad request. Please check your input and try again.';
+        console.error('Update property 400 error:', errorMessage);
+        alert(`Error: ${errorMessage}`);
+        setIsSubmitting(false);
+        return; // Don't redirect
+      } else if (response.status === 500 || response.status === 501) {
+        // Server errors
+        const errorMessage = response.data?.message || 'Server error. Please try again later.';
+        console.error('Update property server error:', response.status, errorMessage);
+        alert(`Server Error (${response.status}): ${errorMessage}`);
+        setIsSubmitting(false);
+        return; // Don't redirect
       } else {
-        throw new Error("Failed to update property");
+        // Any other non-200 status is treated as error
+        const errorMessage = response.data?.message || `Unexpected response status: ${response.status}`;
+        console.error('Update property unexpected status:', response.status, errorMessage);
+        alert(`Error (${response.status}): ${errorMessage}`);
+        setIsSubmitting(false);
+        return; // Don't redirect
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error updating property:', error);
+      
+      // Handle different types of errors
+      if (error.response) {
+        // The request was made and the server responded with a status code
+        const status = error.response.status;
+        const errorMessage = error.response.data?.message || error.message || 'Unknown error occurred';
+        
+        if (status === 400) {
+          alert(`Bad Request: ${errorMessage}`);
+        } else if (status === 500 || status === 501) {
+          alert(`Server Error (${status}): ${errorMessage}`);
+        } else {
+          alert(`Error (${status}): ${errorMessage}`);
+        }
+      } else if (error.request) {
+        // The request was made but no response was received
+        alert("Network error: Unable to reach the server. Please check your internet connection.");
+      } else {
+        // Something happened in setting up the request
+        alert(`Request error: ${error.message || 'Failed to update property. Please try again.'}`);
+      }
     } finally {
       setIsSubmitting(false);
     }
@@ -299,12 +439,7 @@ export default function EditPropertyPage() {
 
   // Render branches
   if (loading) {
-    return (
-      <div className="flex justify-center items-center py-8">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div>
-        <span className="ml-2">Loading property data...</span>
-      </div>
-    );
+    return <LoadingOverlay isLoading={true} />;
   }
 
   if (notFound || !formData) {
@@ -447,16 +582,6 @@ export default function EditPropertyPage() {
                 )}
               </div>
               <div>
-                <Label htmlFor="Area">Area (sq ft)</Label>
-                <Input
-                  id="Area"
-                  type="text"
-                  value={formData.Area}
-                  onChange={(e) => handleChange('Area', e.target.value)}
-                  placeholder="Enter area in square feet"
-                />
-              </div>
-              <div>
                 <Label htmlFor="Bedrooms">Bedrooms</Label>
                 <Input
                   id="Bedrooms"
@@ -518,6 +643,15 @@ export default function EditPropertyPage() {
             </div>
           </div>
 
+          {/* Property Photos */}
+          <div className="rounded-2xl border border-gray-200 bg-white p-5 dark:border-gray-800 dark:bg-white/[0.03]">
+            <h4 className="mb-4 text-base font-semibold text-gray-800 dark:text-white/90">Property Photos</h4>
+            <PhotoUpload
+              photos={photos}
+              onPhotosChange={handlePhotosChange}
+            />
+          </div>
+
           <div className="flex justify-end gap-4 pt-6 border-t">
             <Button
               type="button"
@@ -538,29 +672,13 @@ export default function EditPropertyPage() {
       </ComponentCard>
 
       {/* Success Modal */}
-      <Modal isOpen={showSuccessModal} onClose={() => { setShowSuccessModal(false); router.push('/property'); }}>
-        <div className="p-6 text-center max-w-md mx-auto">
-          <div className="flex items-center justify-center w-14 h-14 mx-auto mb-4 bg-green-100 rounded-full dark:bg-green-900/20">
-            <svg className="w-7 h-7 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-            </svg>
-          </div>
-          <h3 className="mb-2 text-xl font-bold text-gray-900 dark:text-white">
-            Property Profile Updated!
-          </h3>
-          <p className="mb-2 text-gray-700 dark:text-gray-300">
-            The property profile has been successfully updated.
-          </p>
-          <p className="mb-4 text-gray-600 dark:text-gray-400">
-            You can now view or manage this property profile in the property list.
-          </p>
-          <div className="flex justify-center">
-            <Button onClick={() => { setShowSuccessModal(false); router.push('/property'); }} className="px-6 py-2 rounded-lg">
-              Back to Property List
-            </Button>
-          </div>
-        </div>
-      </Modal>
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={handleSuccessModalClose}
+        title="Property Profile Updated!"
+        message="The property profile has been successfully updated."
+        confirmButtonText="Back to Property List"
+      />
     </div>
   );
 }

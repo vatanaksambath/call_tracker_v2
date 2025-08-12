@@ -1,10 +1,16 @@
 "use client";
 import React, { useState, useEffect } from "react";
+import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
+import { Swiper, SwiperSlide } from 'swiper/react';
+import { Navigation, Pagination, Autoplay } from 'swiper/modules';
+import 'swiper/css';
+import 'swiper/css/navigation';
+import 'swiper/css/pagination';
 
 
 const breadcrumbs = [
@@ -26,9 +32,12 @@ interface Property {
   Bathrooms?: string;
   Area?: string;
   YearBuilt?: string;
+  photo_url?: string[];
   is_active?: boolean;
   created_date?: string;
   updated_date?: string;
+  Width?: string;
+  Length?: string;
 }
 
 export default function ViewPropertyPage() {
@@ -42,6 +51,8 @@ export default function ViewPropertyPage() {
   const [propertyNotFound, setPropertyNotFound] = useState(false);
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [showImageModal, setShowImageModal] = useState(false);
+  const [selectedImageIndex, setSelectedImageIndex] = useState(0);
 
   // Fetch property data from API
   useEffect(() => {
@@ -63,12 +74,53 @@ export default function ViewPropertyPage() {
           body: JSON.stringify({ page_number: "1", page_size: "1", search_type: "property_profile_id", query_search: propertyId })
         });
         const data = await res.json();
+        
         const prop = data[0]?.data?.[0];
         if (!prop) {
           setPropertyNotFound(true);
           setIsLoading(false);
           return;
         }
+        
+        // Helper function to format price
+        const formatPrice = (price: string | number | null | undefined) => {
+          if (!price) return '';
+          const numPrice = parseFloat(String(price));
+          if (isNaN(numPrice)) return '';
+          return `$${numPrice.toLocaleString()}`;
+        };
+
+        // Helper function to format date
+        const formatDate = (dateString: string | null | undefined) => {
+          if (!dateString) return 'N/A';
+          try {
+            const date = new Date(dateString);
+            if (isNaN(date.getTime())) return 'N/A';
+            
+            const year = date.getFullYear();
+            const month = String(date.getMonth() + 1).padStart(2, '0');
+            const day = String(date.getDate()).padStart(2, '0');
+            const hours = date.getHours();
+            const minutes = String(date.getMinutes()).padStart(2, '0');
+            const ampm = hours >= 12 ? 'PM' : 'AM';
+            const displayHours = hours % 12 || 12;
+            
+            return `${year}-${month}-${day} ${displayHours}:${minutes} ${ampm}`;
+          } catch {
+            return 'N/A';
+          }
+        };
+
+        // Helper function to calculate area
+        const calculateArea = (width: string | number | null | undefined, length: string | number | null | undefined) => {
+          const w = parseFloat(String(width || 0));
+          const l = parseFloat(String(length || 0));
+          if (isNaN(w) || isNaN(l) || w <= 0 || l <= 0) return null;
+          return w * l;
+        };
+        
+        const calculatedArea = calculateArea(prop.width, prop.length);
+        
         setProperty({
           PropertyID: String(prop.property_profile_id),
           PropertyName: prop.property_profile_name || '',
@@ -80,17 +132,21 @@ export default function ViewPropertyPage() {
             prop.home_number ? `#${prop.home_number}` : ''
           ].filter(Boolean).join(', '),
           PropertyType: prop.property_type_name || '',
-          Price: prop.price ? String(prop.price) : '',
+          Price: formatPrice(prop.price),
           Status: prop.is_active ? 'Available' : 'Inactive',
           Description: prop.description || '',
           Features: prop.feature || '',
           Bedrooms: prop.bedroom ? String(prop.bedroom) : '',
           Bathrooms: prop.bathroom ? String(prop.bathroom) : '',
-          Area: prop.area ? String(prop.area) : '',
+          Area: calculatedArea?.toFixed(2) || '',
           YearBuilt: prop.year_built ? String(prop.year_built) : '',
+          photo_url: prop.photo_url || [],
           is_active: !!prop.is_active,
-          created_date: prop.created_date || '',
-          updated_date: prop.updated_date || '',
+          created_date: formatDate(prop.created_date),
+          updated_date: formatDate(prop.updated_date),
+          // Add new fields for width and length
+          Width: prop.width ? parseFloat(String(prop.width)).toFixed(2) : '',
+          Length: prop.length ? parseFloat(String(prop.length)).toFixed(2) : '',
         });
         setIsLoading(false);
       } catch {
@@ -270,8 +326,23 @@ export default function ViewPropertyPage() {
                 <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Property Details</h3>
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 gap-4">
+                    <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Width:</div>
+                    <div className="col-span-2 text-sm text-gray-900 dark:text-white">{property.Width ? `${property.Width} m` : 'N/A'}</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Length:</div>
+                    <div className="col-span-2 text-sm text-gray-900 dark:text-white">{property.Length ? `${property.Length} m` : 'N/A'}</div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-4">
                     <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Area:</div>
-                    <div className="col-span-2 text-sm text-gray-900 dark:text-white">{property.Area ? `${property.Area} sq ft` : 'N/A'}</div>
+                    <div className="col-span-2 text-sm text-gray-900 dark:text-white">
+                      {property.Area ? `${property.Area} m²` : 'N/A'}
+                      {property.Width && property.Length && property.Area && (
+                        <span className="text-gray-500 dark:text-gray-400 ml-2">
+                          ({property.Width} × {property.Length} m)
+                        </span>
+                      )}
+                    </div>
                   </div>
                   <div className="grid grid-cols-3 gap-4">
                     <div className="text-sm font-medium text-gray-500 dark:text-gray-400">Bedrooms:</div>
@@ -314,6 +385,95 @@ export default function ViewPropertyPage() {
                     </div>
                   ) : (
                     'No features listed.'
+                  )}
+                </div>
+              </div>
+
+              {/* Property Images Carousel */}
+              <div>
+                <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-4">Property Images Gallery</h3>
+                <div className="text-sm text-gray-700 dark:text-gray-300">
+                  {property.photo_url && property.photo_url.length > 0 ? (
+                    <div className="relative group rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-900 shadow-lg">
+                      <Swiper
+                        modules={[Navigation, Pagination, Autoplay]}
+                        spaceBetween={0}
+                        slidesPerView={1}
+                        autoplay={{
+                          delay: 4000,
+                          disableOnInteraction: false,
+                        }}
+                        navigation={{
+                          nextEl: '.swiper-button-next-custom',
+                          prevEl: '.swiper-button-prev-custom',
+                        }}
+                        pagination={{
+                          el: '.custom-pagination',
+                          clickable: true,
+                          bulletClass: 'swiper-pagination-bullet custom-bullet',
+                          bulletActiveClass: 'swiper-pagination-bullet-active custom-bullet-active',
+                        }}
+                        className="h-80 rounded-xl"
+                      >
+                        {property.photo_url.map((imageUrl, index) => (
+                          <SwiperSlide key={index}>
+                            <div 
+                              className="relative h-full w-full cursor-pointer overflow-hidden bg-gray-100 dark:bg-gray-800 flex items-center justify-center" 
+                              onClick={() => {
+                                setSelectedImageIndex(index);
+                                setShowImageModal(true);
+                              }}
+                            >
+                              <Image 
+                                src={imageUrl} 
+                                alt={`Property image ${index + 1}`}
+                                width={800}
+                                height={320}
+                                className="max-h-full max-w-full object-contain"
+                                onError={(e) => {
+                                  const target = e.target as HTMLImageElement;
+                                  target.src = '/images/placeholder-image.png';
+                                }}
+                                unoptimized={true}
+                              />
+                              {/* Overlay gradient for better text visibility */}
+                              <div className="absolute inset-0 bg-gradient-to-t from-black/20 via-transparent to-transparent pointer-events-none" />
+                              
+                              {/* Image counter overlay */}
+                              <div className="absolute top-4 right-4 bg-black/60 text-white text-xs px-2 py-1 rounded-full backdrop-blur-sm">
+                                {index + 1} / {property.photo_url?.length || 0}
+                              </div>
+                            </div>
+                          </SwiperSlide>
+                        ))}
+                      </Swiper>
+
+                      {/* Custom Navigation Arrows */}
+                      <div className="swiper-button-prev-custom absolute left-4 top-1/2 -translate-y-1/2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-gray-800 shadow-lg backdrop-blur-sm transition-all duration-200 hover:bg-white hover:shadow-xl group-hover:opacity-100 opacity-0 cursor-pointer">
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                        </svg>
+                      </div>
+                      
+                      <div className="swiper-button-next-custom absolute right-4 top-1/2 -translate-y-1/2 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white/90 text-gray-800 shadow-lg backdrop-blur-sm transition-all duration-200 hover:bg-white hover:shadow-xl group-hover:opacity-100 opacity-0 cursor-pointer">
+                        <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                        </svg>
+                      </div>
+                      
+                      {/* Custom Pagination Dots */}
+                      <div className="custom-pagination absolute bottom-4 left-1/2 -translate-x-1/2 flex space-x-2"></div>
+                    </div>
+                  ) : (
+                    <div className="flex h-80 items-center justify-center rounded-xl border-2 border-dashed border-gray-300 bg-gray-50 dark:border-gray-600 dark:bg-gray-900">
+                      <div className="text-center">
+                        <svg className="mx-auto mb-4 h-16 w-16 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                        <p className="text-lg font-medium text-gray-500 dark:text-gray-400">No images available</p>
+                        <p className="text-sm text-gray-400 dark:text-gray-500">Property images will appear here</p>
+                      </div>
+                    </div>
                   )}
                 </div>
               </div>
@@ -372,6 +532,119 @@ export default function ViewPropertyPage() {
           </div>
         </div>
       </Modal>
+
+      {/* Image Modal */}
+      <Modal isOpen={showImageModal} onClose={() => setShowImageModal(false)}>
+        <div className="relative w-full max-w-4xl mx-auto">
+          {property?.photo_url && property.photo_url.length > 0 && (
+            <>
+              <div className="relative bg-black rounded-lg overflow-hidden">
+                <Image
+                  src={property.photo_url[selectedImageIndex]}
+                  alt={`Property image ${selectedImageIndex + 1}`}
+                  width={800}
+                  height={600}
+                  className="w-full h-auto max-h-[60vh] object-contain mx-auto block"
+                  onError={(e) => {
+                    const target = e.target as HTMLImageElement;
+                    target.src = '/images/placeholder-image.png';
+                  }}
+                  unoptimized={true}
+                />
+                
+                {/* Navigation buttons */}
+                {property.photo_url.length > 1 && (
+                  <>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedImageIndex(prev => prev > 0 ? prev - 1 : property.photo_url!.length - 1)}
+                      className="absolute left-2 top-1/2 -translate-y-1/2 p-2 bg-black bg-opacity-50 text-white rounded-full hover:bg-opacity-75 transition-all z-10"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 19l-7-7 7-7" />
+                      </svg>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setSelectedImageIndex(prev => prev < property.photo_url!.length - 1 ? prev + 1 : 0)}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 p-2 bg-black bg-opacity-50 text-white rounded-full hover:bg-opacity-75 transition-all z-10"
+                    >
+                      <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 5l7 7-7 7" />
+                      </svg>
+                    </button>
+                  </>
+                )}
+              </div>
+              
+              {/* Image counter and thumbnails */}
+              <div className="p-4 bg-white dark:bg-gray-900 rounded-b-lg">
+                <div className="text-center text-sm text-gray-600 dark:text-gray-400 mb-3">
+                  {selectedImageIndex + 1} of {property.photo_url.length}
+                </div>
+                
+                {property.photo_url.length > 1 && (
+                  <div className="flex justify-center gap-2 overflow-x-auto max-w-full pb-2">
+                    {property.photo_url.map((imageUrl, index) => (
+                      <button
+                        type="button"
+                        key={index}
+                        onClick={() => setSelectedImageIndex(index)}
+                        className={`flex-shrink-0 w-12 h-12 rounded-md overflow-hidden border-2 transition-all ${
+                          index === selectedImageIndex
+                            ? 'border-blue-500 ring-2 ring-blue-200 dark:ring-blue-800'
+                            : 'border-gray-300 hover:border-gray-400 dark:border-gray-600'
+                        }`}
+                      >
+                        <Image
+                          src={imageUrl}
+                          alt={`Thumbnail ${index + 1}`}
+                          width={48}
+                          height={48}
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            const target = e.target as HTMLImageElement;
+                            target.src = '/images/placeholder-image.png';
+                          }}
+                          unoptimized={true}
+                        />
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 }
+
+{/* Custom Swiper Styles */}
+<style jsx global>{`
+  .custom-bullet {
+    background: rgba(255, 255, 255, 0.5) !important;
+    width: 8px !important;
+    height: 8px !important;
+    border-radius: 50% !important;
+    transition: all 0.3s ease !important;
+  }
+  
+  .custom-bullet-active {
+    background: white !important;
+    width: 12px !important;
+    height: 12px !important;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.3) !important;
+  }
+
+  .swiper-button-next-custom:after,
+  .swiper-button-prev-custom:after {
+    display: none !important;
+  }
+
+  .swiper-button-disabled {
+    opacity: 0.3 !important;
+    cursor: not-allowed !important;
+  }
+`}</style>

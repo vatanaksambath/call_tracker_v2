@@ -1,5 +1,6 @@
 "use client";
 import React, { useState } from "react";
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 import { useRouter, useSearchParams } from "next/navigation";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
@@ -118,7 +119,7 @@ export default function PaymentSchedulePage() {
   return (
     <div>
       <PageBreadcrumb crumbs={breadcrumbs} />
-      
+      <LoadingOverlay isLoading={isCalculating} />
       <div className="space-y-6">
         {/* Payment Schedule Input Form */}
         <ComponentCard title="Loan Payment Schedule Calculator">

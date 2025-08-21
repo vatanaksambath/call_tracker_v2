@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 import { useRouter } from "next/navigation";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
@@ -9,7 +10,7 @@ import Input from "@/components/form/input/InputField";
 import TextArea from "@/components/form/input/TextArea";
 import PhoneInput from "@/components/form/input/PhoneInput";
 import { Modal } from "@/components/ui/modal";
-import SelectionModal from "@/components/common/SelectionModal";
+import SuccessModal from "@/components/ui/modal/SuccessModal";
 import PaginatedSelectionModal from "@/components/common/PaginatedSelectionModal";
 import { getUserFromToken } from "@/lib/api";
 
@@ -19,7 +20,7 @@ export default function CallPipelineEditForm() {
   // Lead, Staff, Property types
   type MappedLead = {
     lead_id: string;
-    lead_name: string;
+    full_name: string; // Changed from lead_name to full_name for PaginatedSelectionModal compatibility
     primary_contact: string;
     original: Record<string, unknown>;
   };
@@ -110,6 +111,8 @@ export default function CallPipelineEditForm() {
   const [showStaffModal, setShowStaffModal] = useState(false);
   const [showPropertyModal, setShowPropertyModal] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [successModalStatus, setSuccessModalStatus] = useState<number|undefined>(undefined);
+  const [successModalMessage, setSuccessModalMessage] = useState<string>("");
   const [showCreateLeadModal, setShowCreateLeadModal] = useState(false);
   const [showLeadSuccessModal, setShowLeadSuccessModal] = useState(false);
 
@@ -138,6 +141,20 @@ export default function CallPipelineEditForm() {
   const [leadSearchQuery, setLeadSearchQuery] = useState("");
   const [leadSearchType, setLeadSearchType] = useState("");
   const leadPageSize = 10;
+
+  // Staff pagination states
+  const [staffCurrentPage, setStaffCurrentPage] = useState(1);
+  const [staffTotalRows, setStaffTotalRows] = useState(0);
+  const [staffSearchQuery, setStaffSearchQuery] = useState("");
+  const [staffSearchType, setStaffSearchType] = useState("");
+  const staffPageSize = 10;
+
+  // Property pagination states
+  const [propertyCurrentPage, setPropertyCurrentPage] = useState(1);
+  const [propertyTotalRows, setPropertyTotalRows] = useState(0);
+  const [propertySearchQuery, setPropertySearchQuery] = useState("");
+  const [propertySearchType, setPropertySearchType] = useState("");
+  const propertyPageSize = 10;
 
   // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -215,19 +232,17 @@ export default function CallPipelineEditForm() {
       const responseData = await res.json();
       console.log("Update API success response:", responseData);
       
-      setShowSuccessModal(true);
+  setSuccessModalStatus(200);
+  setSuccessModalMessage("Call Pipeline Updated Successfully! Your call pipeline changes have been saved. What would you like to do next?");
+  setShowSuccessModal(true);
     } catch (err) {
       console.error("Update call pipeline error:", err);
-      // Show error to user
-      setErrors({ purpose: "Failed to update call pipeline. Please try again." });
+      setSuccessModalStatus(400);
+      setSuccessModalMessage("Failed to update call pipeline. Please try again.");
+      setShowSuccessModal(true);
     } finally {
       setIsSubmitting(false);
     }
-  };
-
-  const handleCreateAnother = () => {
-    setShowSuccessModal(false);
-    router.push("/callpipeline/edit");
   };
 
   const handleGoToPipeline = () => {
@@ -320,7 +335,7 @@ export default function CallPipelineEditForm() {
         photo_url: null,
         contact_data: [
           {
-            channel_type_id: "2", // Updated to 2 as requested
+            channel_type_id: "3", // Updated to 3 as requested
             contact_values: [
               {
                 user_name: `${firstName} ${lastName}`.trim(), // Use full name as requested
@@ -387,6 +402,32 @@ export default function CallPipelineEditForm() {
     setLeadSearchType(searchType);
     setLeadCurrentPage(1);
     fetchLeads(1, query, searchType);
+  };
+
+  // --- Staff Pagination Handlers ---
+  const handleStaffPageChange = (page: number) => {
+    setStaffCurrentPage(page);
+    fetchStaff(page, staffSearchQuery, staffSearchType);
+  };
+
+  const handleStaffSearch = (query: string, searchType: string) => {
+    setStaffSearchQuery(query);
+    setStaffSearchType(searchType);
+    setStaffCurrentPage(1);
+    fetchStaff(1, query, searchType);
+  };
+
+  // --- Property Pagination Handlers ---
+  const handlePropertyPageChange = (page: number) => {
+    setPropertyCurrentPage(page);
+    fetchProperties(page, propertySearchQuery, propertySearchType);
+  };
+
+  const handlePropertySearch = (query: string, searchType: string) => {
+    setPropertySearchQuery(query);
+    setPropertySearchType(searchType);
+    setPropertyCurrentPage(1);
+    fetchProperties(1, query, searchType);
   };
 
   // --- Fetch Functions for Modals ---
@@ -506,7 +547,7 @@ export default function CallPipelineEditForm() {
         }
         return {
           lead_id: String(leadData.lead_id || ""),
-          lead_name: String(leadData.lead_name || leadFullName || "(No Name)"),
+          full_name: String(leadData.lead_name || leadFullName || "(No Name)"), // Use full_name for compatibility
           primary_contact: primaryContact || "(No Contact)",
           original: leadData,
         };
@@ -522,18 +563,22 @@ export default function CallPipelineEditForm() {
     }
   };
 
-  const fetchStaff = async () => {
+  const fetchStaff = async (page?: number, search?: string, searchType?: string) => {
     setIsStaffLoading(true);
     try {
+      const currentPage = page || staffCurrentPage;
+      const currentSearch = search !== undefined ? search : staffSearchQuery;
+      const currentSearchType = searchType !== undefined ? searchType : staffSearchType;
+      
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       let baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
       baseUrl = baseUrl.replace(/\/+$/, "");
       const endpoint = `${baseUrl}/staff/pagination`;
       const body = {
-        page_number: "1",
-        page_size: "10",
-        search_type: "",
-        query_search: "",
+        page_number: String(currentPage),
+        page_size: String(staffPageSize),
+        search_type: currentSearchType,
+        query_search: currentSearch,
       };
       console.log("Staff API endpoint:", endpoint);
       console.log("Staff API request body:", body);
@@ -549,12 +594,17 @@ export default function CallPipelineEditForm() {
       const data = await res.json();
       console.log("Staff API response:", data);
       let staffArr: unknown[] = [];
+      let totalRows = 0;
+      
       if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
         staffArr = data[0].data;
+        totalRows = data[0].total_row || 0;
       } else if (Array.isArray(data?.data)) {
         staffArr = data.data;
+        totalRows = data.total_row || 0;
       } else if (Array.isArray(data?.results)) {
         staffArr = data.results;
+        totalRows = data.total_row || 0;
       }
       
       // Map to MappedStaff format for edit page
@@ -563,32 +613,38 @@ export default function CallPipelineEditForm() {
         const fullName = [staffData.first_name, staffData.last_name].filter(Boolean).join(" ").trim();
         return {
           staff_id: String(staffData.staff_id || ""),
-          full_name: String(fullName || "(No Name)"),
-          position: String(staffData.position || "(No Position)"),
+          full_name: String(fullName || staffData.username || "(No Name)"),
+          position: String(staffData.position || staffData.role || "(No Position)"),
           original: staffData,
         };
       });
       setStaffData(mapped);
+      setStaffTotalRows(totalRows);
     } catch (err) {
       console.error("Staff API error:", err);
       setStaffData([]);
+      setStaffTotalRows(0);
     } finally {
       setIsStaffLoading(false);
     }
   };
 
-  const fetchProperties = async () => {
+  const fetchProperties = async (page?: number, search?: string, searchType?: string) => {
     setIsPropertyLoading(true);
     try {
+      const currentPage = page || propertyCurrentPage;
+      const currentSearch = search !== undefined ? search : propertySearchQuery;
+      const currentSearchType = searchType !== undefined ? searchType : propertySearchType;
+      
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       let baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
       baseUrl = baseUrl.replace(/\/+$/, "");
       const endpoint = `${baseUrl}/property-profile/pagination`;
       const body = {
-        page_number: "1",
-        page_size: "10",
-        search_type: "",
-        query_search: "",
+        page_number: String(currentPage),
+        page_size: String(propertyPageSize),
+        search_type: currentSearchType,
+        query_search: currentSearch,
       };
       console.log("Property API endpoint:", endpoint);
       console.log("Property API request body:", body);
@@ -604,12 +660,17 @@ export default function CallPipelineEditForm() {
       const data = await res.json();
       console.log("Property API response:", data);
       let propertyArr: unknown[] = [];
+      let totalRows = 0;
+      
       if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
         propertyArr = data[0].data;
+        totalRows = data[0].total_row || 0;
       } else if (Array.isArray(data?.data)) {
         propertyArr = data.data;
+        totalRows = data.total_row || 0;
       } else if (Array.isArray(data?.results)) {
         propertyArr = data.results;
+        totalRows = data.total_row || 0;
       }
       
       // Map to MappedProperty format for edit page
@@ -625,9 +686,11 @@ export default function CallPipelineEditForm() {
         };
       });
       setPropertiesData(mapped);
+      setPropertyTotalRows(totalRows);
     } catch (err) {
       console.error("Property API error:", err);
       setPropertiesData([]);
+      setPropertyTotalRows(0);
     } finally {
       setIsPropertyLoading(false);
     }
@@ -640,10 +703,75 @@ export default function CallPipelineEditForm() {
     const id = urlParams.get('id') || "";
     console.log("Extracted call log ID from URL query:", id);
     setCallLogId(id);
+
+    // Check if we have pre-populated data from CallLogsTable
+    const leadId = urlParams.get('leadId');
+    const leadName = urlParams.get('leadName'); 
+    const propertyId = urlParams.get('propertyId');
+    const propertyName = urlParams.get('propertyName');
+    const propertyPrice = urlParams.get('propertyPrice');
+    const purpose = urlParams.get('purpose');
+    const createdBy = urlParams.get('createdBy');
+    const leadPhone = urlParams.get('leadPhone');
+
+    // If we have pre-populated data, use it to avoid API call
+    if (leadId && leadName && propertyId && propertyName) {
+      console.log("Using pre-populated data from CallLogsTable");
+      
+      const mappedLead: MappedLead = {
+        lead_id: leadId,
+        full_name: leadName,
+        primary_contact: formatPhoneNumber(leadPhone || ''),
+        original: {},
+      };
+
+      const mappedStaff: MappedStaff = {
+        staff_id: "", // Will be populated when staff modal is opened if needed
+        full_name: createdBy || "(No Name)",
+        position: "(No Position)",
+        original: {},
+      };
+
+      const mappedProperty: MappedProperty = {
+        property_profile_id: propertyId,
+        property_profile_name: propertyName,
+        property_type_name: "",
+        project_name: "",
+        price: propertyPrice || "",
+        original: {},
+      };
+
+      setFormData({
+        selectedLead: mappedLead,
+        selectedStaff: mappedStaff,
+        selectedProperty: mappedProperty,
+        purpose: purpose || "",
+      });
+
+      setIsInitialLoading(false);
+      console.log("Pre-populated form data:", {
+        selectedLead: mappedLead,
+        selectedStaff: mappedStaff,
+        selectedProperty: mappedProperty,
+        purpose: purpose || "",
+      });
+    }
   }, []);
 
   useEffect(() => {
     if (!callLogId) return;
+    
+    // Check if we already have pre-populated data (from URL params)
+    const urlParams = new URLSearchParams(window.location.search);
+    const hasPrePopulatedData = urlParams.get('leadId') && urlParams.get('leadName') && 
+                                urlParams.get('propertyId') && urlParams.get('propertyName');
+    
+    if (hasPrePopulatedData) {
+      console.log("Skipping API call - using pre-populated data from CallLogsTable");
+      return;
+    }
+    
+    console.log("No pre-populated data found, fetching from API...");
     const fetchCallLogData = async () => {
       try {
         const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
@@ -714,7 +842,7 @@ export default function CallPipelineEditForm() {
           
           const mappedLead: MappedLead = {
             lead_id: String(log.lead_id || ""),
-            lead_name: log.lead_name || "(No Name)",
+            full_name: log.lead_name || "(No Name)",
             primary_contact: primaryContact || "(No Contact)",
             original: log,
           };
@@ -792,11 +920,7 @@ export default function CallPipelineEditForm() {
   }, [callLogId, fetchPropertyDetails]);
 
   if (isInitialLoading) {
-    return (
-      <div className="flex items-center justify-center h-96">
-        <span className="text-lg text-gray-500">Loading call pipeline data...</span>
-      </div>
-    );
+    return <LoadingOverlay isLoading={true} />;
   }
 
   return (
@@ -814,7 +938,7 @@ export default function CallPipelineEditForm() {
                   <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border">
                     <div>
                       <div className="font-medium text-gray-800 dark:text-white">
-                        {formData.selectedLead.lead_name}
+                        {formData.selectedLead.full_name}
                       </div>
                       <div className="text-sm text-gray-500 dark:text-gray-400">
                         {formatPhoneNumber(formData.selectedLead.primary_contact)}
@@ -825,7 +949,7 @@ export default function CallPipelineEditForm() {
                         variant="outline"
                         size="sm"
                         onClick={() => {
-                          router.push(`/lead/edit?id=${formData.selectedLead?.lead_id}`);
+                          router.push(`/lead/edit/${formData.selectedLead?.lead_id}`);
                         }}
                       >
                         Edit
@@ -1022,7 +1146,7 @@ export default function CallPipelineEditForm() {
         data={mappedLeads}
         columns={[
           { key: "lead_id", label: "ID" },
-          { key: "lead_name", label: "Name" },
+          { key: "full_name", label: "Name" },
           { key: "primary_contact", label: "Primary Contact" },
         ]}
         searchPlaceholder="Search leads..."
@@ -1046,7 +1170,7 @@ export default function CallPipelineEditForm() {
         }
       />
 
-      <SelectionModal
+      <PaginatedSelectionModal
         isOpen={showStaffModal}
         onClose={() => setShowStaffModal(false)}
         onSelect={(staff) => handleChange("selectedStaff", staff)}
@@ -1059,9 +1183,16 @@ export default function CallPipelineEditForm() {
         ]}
         searchPlaceholder="Search staff..."
         isLoading={isStaffLoading}
+        currentPage={staffCurrentPage}
+        totalRows={staffTotalRows}
+        pageSize={staffPageSize}
+        onPageChange={handleStaffPageChange}
+        onSearch={handleStaffSearch}
+        searchQuery={staffSearchQuery}
+        searchType={staffSearchType}
       />
 
-      <SelectionModal
+      <PaginatedSelectionModal
         isOpen={showPropertyModal}
         onClose={() => setShowPropertyModal(false)}
         onSelect={(property) => handleChange("selectedProperty", property)}
@@ -1076,80 +1207,24 @@ export default function CallPipelineEditForm() {
         ]}
         searchPlaceholder="Search properties..."
         isLoading={isPropertyLoading}
+        currentPage={propertyCurrentPage}
+        totalRows={propertyTotalRows}
+        pageSize={propertyPageSize}
+        onPageChange={handlePropertyPageChange}
+        onSearch={handlePropertySearch}
+        searchQuery={propertySearchQuery}
+        searchType={propertySearchType}
       />
 
-      {/* Success Modal */}
-      <Modal
+      {/* Success/Error Modal (Universal) */}
+      <SuccessModal
         isOpen={showSuccessModal}
         onClose={() => setShowSuccessModal(false)}
-        className="max-w-md p-6"
-      >
-        <div className="text-center">
-          <div className="flex items-center justify-center w-12 h-12 mx-auto mb-4 bg-green-100 rounded-full dark:bg-green-900/20">
-            <svg
-              className="w-6 h-6 text-green-600 dark:text-green-400"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M5 13l4 4L19 7"
-              />
-            </svg>
-          </div>
-
-          <h3 className="mb-2 text-lg font-semibold text-gray-800 dark:text-white">
-            Call Pipeline Updated Successfully!
-          </h3>
-
-          <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-            Your call pipeline changes have been saved. What would you like to do next?
-          </p>
-
-          <div className="flex flex-col gap-3">
-            <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
-              <Button
-                variant="outline"
-                onClick={handleCreateAnother}
-                className="flex-1"
-              >
-                Edit Another Pipeline
-              </Button>
-              <Button
-                variant="primary"
-                onClick={handleGoToPipeline}
-                className="flex-1"
-              >
-                Go to Call Pipeline
-              </Button>
-            </div>
-            
-            {/* Loan Payment Schedule Button */}
-            <div className="border-t pt-3 mt-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const propertyPrice = formData.selectedProperty?.price || 0;
-                  const params = new URLSearchParams({
-                    propertyPrice: String(propertyPrice),
-                    callPipelineId: callLogId || 'edit'
-                  });
-                  router.push(`/callpipeline/payment_schedule?${params.toString()}`);
-                }}
-                className="w-full bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-300 hover:bg-blue-100 dark:hover:bg-blue-900/30"
-              >
-                📊 Generate Loan Payment Schedule
-              </Button>
-              <p className="text-xs text-gray-500 dark:text-gray-400 mt-1 text-center">
-                Calculate payment schedule based on selected property price
-              </p>
-            </div>
-          </div>
-        </div>
-      </Modal>
+        statusCode={successModalStatus}
+        message={successModalMessage}
+        buttonText={successModalStatus === 200 ? "Go to Call Pipeline" : undefined}
+        onButtonClick={successModalStatus === 200 ? handleGoToPipeline : () => setShowSuccessModal(false)}
+      />
 
       {/* Create New Lead Modal */}
       <Modal

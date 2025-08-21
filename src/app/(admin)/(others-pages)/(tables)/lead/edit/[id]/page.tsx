@@ -18,6 +18,7 @@ import ContactInfo, {
 } from '@/components/form/ContactInfo';
 import ImageUpload from '@/components/form/ImageUpload';
 import LoadingOverlay from '@/components/ui/loading/LoadingOverlay';
+import SuccessModal from '@/components/ui/modal/SuccessModal';
 import { formatDateForAPI } from '@/lib/utils';
 
 interface SelectOption {
@@ -40,11 +41,11 @@ export default function UpdateLeadPage() {
     firstName: '',
     lastName: '',
     gender: null as SelectOption | null,
-    dob: null as Date | null,
+    dob: null as string | null,
     email: '',
     occupation: '',
     leadSource: null as SelectOption | null,
-    contactDate: null as Date | null,
+    contactDate: null as string | null,
     customerType: null as SelectOption | null,
     business: null as SelectOption | null,
     address: {
@@ -91,11 +92,9 @@ export default function UpdateLeadPage() {
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<{
-    variant: 'success' | 'error';
-    title: string;
-    message: string;
-  } | null>(null);
+  // Removed alertInfo, now using errorModal for all error feedback
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [errorModal, setErrorModal] = useState<{ open: boolean; statusCode?: number; message?: string }>({ open: false });
 
   useEffect(() => {
     if (!leadId) {
@@ -128,6 +127,17 @@ export default function UpdateLeadPage() {
           'channel_type_name'
         );
         
+        // Helper to format date string as 'YYYY-MM-DD' for flatpickr
+        const formatDateYMD = (dateStr: string | null | undefined) => {
+          if (!dateStr) return '';
+          const d = new Date(dateStr);
+          if (isNaN(d.getTime())) return '';
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+
         setFormData({
           firstName: leadData.data[0].first_name || '',
           lastName: leadData.data[0].last_name || '',
@@ -135,18 +145,14 @@ export default function UpdateLeadPage() {
             value: String(leadData.data[0].gender_id),
             label: leadData.data[0].gender_name,
           } : null,
-          dob: leadData.data[0].date_of_birth
-            ? new Date(leadData.data[0].date_of_birth)
-            : null,
+          dob: formatDateYMD(leadData.data[0].date_of_birth),
           email: leadData.data[0].email || '',
           occupation: leadData.data[0].occupation || '',
           leadSource: leadData.data[0].lead_source_id ? {
             value: String(leadData.data[0].lead_source_id),
             label: leadData.data[0].lead_source_name,
           } : null,
-          contactDate: leadData.data[0].relationship_date
-            ? new Date(leadData.data[0].relationship_date)
-            : null,
+          contactDate: formatDateYMD(leadData.data[0].relationship_date),
           customerType: leadData.data[0].customer_type_id ? {
             value: String(leadData.data[0].customer_type_id),
             label: leadData.data[0].customer_type_name,
@@ -319,19 +325,19 @@ export default function UpdateLeadPage() {
   };
 
   const handleUpdate = async () => {
-    if (!validate() || !formData.currentStaffId.toString()) {
-      if (!formData.currentStaffId.toString()) {
-        setAlertInfo({
-          variant: 'error',
-          title: 'Authentication Error',
-          message: 'Could not find user information. Please log in again.',
-        });
-        setTimeout(() => {
-          router.push("/signin");
-        }, 2000);
+      if (!validate() || !formData.currentStaffId.toString()) {
+        if (!formData.currentStaffId.toString()) {
+          setErrorModal({
+            open: true,
+            statusCode: 401,
+            message: 'Could not find user information. Please log in again.'
+          });
+          setTimeout(() => {
+            router.push("/signin");
+          }, 2000);
+        }
+        return;
       }
-      return;
-    }
 
     setIsSaving(true);
     try {
@@ -387,21 +393,20 @@ export default function UpdateLeadPage() {
 
       const createLead = await api.put(`/lead/update`, leadPayload);
       if (createLead.data[0].statusCode === 200) {
-        setAlertInfo({
-          variant: 'success',
-          title: 'Success!',
-          message: 'Lead has been updated successfully.',
+        setShowSuccess(true);
+      } else {
+        setErrorModal({
+          open: true,
+          statusCode: createLead.data[0].statusCode,
+          message: createLead.data[0].message || 'Failed to update lead',
         });
-        setTimeout(() => {
-          router.push('/lead');
-        }, 3000);
       }
     } catch (err) {
       console.error('Failed to update lead:', err);
-      setAlertInfo({
-        variant: 'error',
-        title: 'Save Failed',
-        message: 'An error occurred while updating the lead. Please try again.',
+      setErrorModal({
+        open: true,
+        statusCode: 500,
+        message: 'An error occurred while updating the lead. Please try again.'
       });
     } finally {
       setIsSaving(false);
@@ -415,15 +420,25 @@ export default function UpdateLeadPage() {
   return (
     <>
       <LoadingOverlay isLoading={isLoading || isSaving} />
-      {alertInfo && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-            <h3 className="text-lg font-semibold mb-2">{alertInfo.title}</h3>
-            <p className="text-gray-600 mb-4">{alertInfo.message}</p>
-            <Button onClick={() => setAlertInfo(null)}>OK</Button>
-          </div>
-        </div>
-      )}
+      {/* Universal Success Modal */}
+      <SuccessModal
+        isOpen={showSuccess}
+        onClose={() => {
+          setShowSuccess(false);
+          router.push('/lead');
+        }}
+        statusCode={200}
+        message="The lead has been updated successfully."
+        buttonText="Go to Lead List"
+      />
+      {/* Error Modal */}
+      <SuccessModal
+        isOpen={errorModal.open}
+        onClose={() => setErrorModal({ open: false })}
+        statusCode={errorModal.statusCode}
+        message={errorModal.message}
+        buttonText="Okay, Got It"
+      />
       <div>
         <PageBreadcrumb crumbs={breadcrumbs} />
         <div className="space-y-6">
@@ -508,7 +523,7 @@ export default function UpdateLeadPage() {
                         id="date-picker-dob"
                         label="Date of Birth"
                         placeholder="Select a date"
-                        value={formData.dob || undefined}
+                        defaultDate={formData.dob || undefined}
                         onChange={(dates) => handleChange('dob', dates[0])}
                       />
                       {errors.dob && <p className="text-sm text-red-500 mt-1">{errors.dob}</p>}
@@ -586,7 +601,7 @@ export default function UpdateLeadPage() {
                         id="date-picker-contactDate"
                         label="Contact Date"
                         placeholder="Select a date"
-                        value={formData.contactDate || undefined}
+                        defaultDate={formData.contactDate || undefined}
                         onChange={(dates) => handleChange('contactDate', dates[0])}
                       />
                       {errors.contactDate && <p className="text-sm text-red-500 mt-1">{errors.contactDate}</p>}

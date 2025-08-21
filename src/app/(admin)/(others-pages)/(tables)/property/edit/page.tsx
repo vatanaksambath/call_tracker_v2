@@ -71,6 +71,7 @@ export default function EditPropertyPage() {
   const [formData, setFormData] = useState<FormData | null>(null);
   const [formErrors, setFormErrors] = useState<FormErrors>({});
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [errorModal, setErrorModal] = useState<{ open: boolean; statusCode?: number; message?: string }>({ open: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [projectOptions, setProjectOptions] = useState<ISelectOption[]>([]);
   const [propertyTypeOptions, setPropertyTypeOptions] = useState<ISelectOption[]>([]);
@@ -189,7 +190,7 @@ export default function EditPropertyPage() {
               commune: prop.commune_id ? { value: String(prop.commune_id), label: prop.commune_name } : null,
               village: prop.village_id ? { value: String(prop.village_id), label: prop.village_name } : null,
               homeAddress: prop.home_number || '',
-              streetAddress: prop.street_address || '',
+              streetAddress: prop.address || '',
             },
             PropertyType: prop.property_type_id ? { value: String(prop.property_type_id), label: prop.property_type_name } : null,
             Project: prop.project_id ? { value: String(prop.project_id), label: prop.project_name } : null,
@@ -358,7 +359,7 @@ export default function EditPropertyPage() {
         property_profile_name: String(formData.PropertyName || ""),
         home_number: String(formData.Location.homeAddress || ""),
         room_number: String(formData.Location.homeAddress || ""), // Use same as home_number for consistency
-        address: String(formData.Location.province?.label + " " + formData.Location.district?.label + " " + formData.Location.commune?.label).trim() || String(formData.Location.homeAddress || ""),
+        address: String(formData.Location.streetAddress || ""),
         width: String(formData.Width || ""),
         length: String(formData.Length || ""),
         price: String(formData.Price || ""),
@@ -675,9 +676,17 @@ export default function EditPropertyPage() {
       <SuccessModal
         isOpen={showSuccessModal}
         onClose={handleSuccessModalClose}
-        title="Property Profile Updated!"
+        statusCode={200}
         message="The property profile has been successfully updated."
-        confirmButtonText="Back to Property List"
+        buttonText="Back to Property List"
+      />
+      {/* Error Modal */}
+      <SuccessModal
+        isOpen={errorModal.open}
+        onClose={() => setErrorModal({ open: false })}
+        statusCode={errorModal.statusCode}
+        message={errorModal.message}
+        buttonText="Okay, Got It"
       />
     </div>
   );

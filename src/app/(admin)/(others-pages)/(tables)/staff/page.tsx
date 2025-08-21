@@ -65,7 +65,7 @@ export default function StaffPage() {
       <div className="space-y-6">
         <PageBreadcrumb crumbs={breadcrumbs} />
         <div className="space-y-6">
-          <ComponentCard title="Staff">
+          <ComponentCard title="Staff Management">
             <div className="text-center py-8">
               <p className="text-gray-500">Unable to load staff. Please try again later.</p>
             </div>
@@ -109,7 +109,7 @@ export default function StaffPage() {
       </div>
 
       <div className="space-y-6">
-        <ComponentCard title="Staff">
+        <ComponentCard title="Staff Management">
           <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
             <div className="flex items-center gap-3">
               <Link href="/staff/create">

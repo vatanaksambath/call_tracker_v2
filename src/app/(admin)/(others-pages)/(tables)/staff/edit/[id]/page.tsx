@@ -41,7 +41,6 @@ export default function UpdateStaffPage() {
     lastName: '',
     gender: null as SelectOption | null,
     dob: null as Date | string | null,
-    email: '',
     staffCode: '',
     position: '',
     department: null as SelectOption | null,
@@ -108,6 +107,8 @@ export default function UpdateStaffPage() {
       return;
     }
 
+    console.log('🔍 Edit Staff Page - Staff ID from URL:', staffId);
+
     const fetchInitialData = async () => {
       try {
         const [gender, channelType] = await Promise.all([
@@ -118,15 +119,24 @@ export default function UpdateStaffPage() {
         // Try direct staff endpoint first, then fallback to pagination
         let staffRecord = null;
         
+        console.log('🔍 Making API call with:', {
+          search_type: 'staff_id',
+          query_search: staffId,
+        });
+        
         const staffRes = await api.post('/staff/pagination', {
           page_number: String('1'),
           page_size: String('10'),
-          search_type: 'staff_code',
+          search_type: 'staff_id',
           query_search: String(`${staffId}`),
         });
 
+        console.log('📋 API Response:', staffRes.data);
+        
         const staffData = staffRes.data[0];
         staffRecord = staffData.data[0];
+        
+        console.log('👤 Found staff record:', staffRecord);
         
         if (!staffRecord) {
           console.error('Could not find staff record in any API response');
@@ -145,6 +155,17 @@ export default function UpdateStaffPage() {
           'channel_type_name'
         );
         
+        // Helper to format date string as 'YYYY-MM-DD' for flatpickr
+        const formatDateYMD = (dateStr: string | null | undefined) => {
+          if (!dateStr) return '';
+          const d = new Date(dateStr);
+          if (isNaN(d.getTime())) return '';
+          const year = d.getFullYear();
+          const month = String(d.getMonth() + 1).padStart(2, '0');
+          const day = String(d.getDate()).padStart(2, '0');
+          return `${year}-${month}-${day}`;
+        };
+
         setFormData({
           firstName: staff.first_name || '',
           lastName: staff.last_name || '',
@@ -152,8 +173,7 @@ export default function UpdateStaffPage() {
             value: String(staff.gender_id),
             label: staff.gender_name || 'Unknown',
           } : null,
-          dob: staff.date_of_birth,
-          email: '', // Email not available in API response, set as empty
+          dob: formatDateYMD(staff.date_of_birth),
           staffCode: staff.staff_code || '',
           position: staff.position || '',
           department: staff.department ? {
@@ -168,7 +188,7 @@ export default function UpdateStaffPage() {
             value: String(staff.employment_level),
             label: staff.employment_level,
           } : null,
-          employmentStartDate: staff.employment_start_date,
+          employmentStartDate: formatDateYMD(staff.employment_start_date),
           address: {
             province: staff.province_id
               ? {
@@ -291,10 +311,6 @@ export default function UpdateStaffPage() {
     if (!formData.employmentStartDate)
       newErrors.employmentStartDate = 'Employment start date is required.';
 
-    // Email validation
-    if (formData.email && !/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = 'Please enter a valid email address.';
-    }
 
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -356,7 +372,6 @@ export default function UpdateStaffPage() {
         employment_end_date: null,
         employment_level: formData.employmentLevel?.label || null,
         current_address: formData.address.homeAddress || null,
-        email: formData.email || null,
         street_address: formData.address.streetAddress || null,
         photo_url: photoUrl ? [photoUrl] : [],
         is_active: true,
@@ -367,7 +382,6 @@ export default function UpdateStaffPage() {
       console.log('Staff payload before API call:', JSON.stringify(staffPayload, null, 2));
       console.log('Date of birth:', formData.dob, '-> formatted:', formatDateForAPI(formData.dob));
       console.log('Employment start date:', formData.employmentStartDate, '-> formatted:', formatDateForAPI(formData.employmentStartDate));
-      console.log('Email:', formData.email);
       console.log('Street address:', formData.address.streetAddress);
 
       const updateStaff = await api.put('/staff/update', staffPayload);
@@ -411,6 +425,7 @@ export default function UpdateStaffPage() {
       )}
       <div>
         <PageBreadcrumb crumbs={breadcrumbs} />
+      <LoadingOverlay isLoading={isLoading || isSaving} />
         <div className="space-y-6">
           <ComponentCard title="Edit Staff Member">
             <div className="relative">
@@ -493,28 +508,12 @@ export default function UpdateStaffPage() {
                         id="date-picker-dob"
                         label="Date of Birth *"
                         placeholder="Select a date"
-                        value={formData.dob || undefined}
+                        defaultDate={formData.dob || undefined}
                         onChange={(dates) => handleChange('dob', dates[0])}
                       />
                       {errors.dob && <p className="text-sm text-red-500 mt-1">{errors.dob}</p>}
                     </div>
 
-                    <div className="col-span-2 lg:col-span-1">
-                      <Label>Email</Label>
-                      <div className="relative">
-                        <Input
-                          placeholder="info@company.com"
-                          type="email"
-                          className="pl-[62px]"
-                          value={formData.email}
-                          onChange={(e) => handleChange('email', e.target.value)}
-                        />
-                        <span className="absolute left-0 top-1/2 -translate-y-1/2 border-r border-gray-200 px-3.5 py-3 text-gray-500 dark:border-gray-800 dark:text-gray-400">
-                          <EnvelopeIcon />
-                        </span>
-                      </div>
-                      {errors.email && <p className="text-sm text-red-500 mt-1">{errors.email}</p>}
-                    </div>
                   </div>
                 </div>
 
@@ -585,7 +584,7 @@ export default function UpdateStaffPage() {
                         id="date-picker-employment-start"
                         label="Employment Start Date *"
                         placeholder="Select start date"
-                        value={formData.employmentStartDate || undefined}
+                        defaultDate={formData.employmentStartDate || undefined}
                         onChange={(dates) => handleChange('employmentStartDate', dates[0])}
                       />
                       {errors.employmentStartDate && <p className="text-sm text-red-500 mt-1">{errors.employmentStartDate}</p>}

@@ -6,40 +6,57 @@ import Label from "@/components/form/Label";
 import Button from "@/components/ui/button/Button";
 import { EyeCloseIcon, EyeIcon } from "@/icons";
 import React, { useState, useEffect } from "react";
-import { useRouter, usePathname } from "next/navigation";
-import axios from 'axios';
+import { useRouter } from "next/navigation";
+import { useAuth } from "@/hooks/useAuth";
 import LoadingOverlay from "@/components/ui/loading/LoadingOverlay"
 import Link from "next/link";
-
+import axios from 'axios';
+import { fetchAndStoreStaffInfo } from '@/lib/fetchAndStoreStaffInfo';
 
 export default function SignInForm() {
   const [showPassword, setShowPassword] = useState(false);
   const [isChecked, setIsChecked] = useState(false);
   const [user_id, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [isMounted, setIsMounted] = useState(false);
 
   const [usernameError, setUsernameError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [loginError, setLoginError] = useState('');
-
   const [loading, setLoading] = useState(false);
 
-  const [token, setToken] = useState<string | null>(null);
-
   const router = useRouter();
-  const currentPathname = usePathname();
+  const { login, isAuth } = useAuth();
 
-  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL; 
+  const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL;
 
+  // Prevent hydration issues
   useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-    if (storedToken) {
-      setToken(storedToken);
-      router.push('/');
-    } else {
-        router.push('/signin');
+    setIsMounted(true);
+  }, []);
+
+  // Redirect if already authenticated
+  useEffect(() => {
+    if (isAuth) {
+      router.push('/callpipeline');
     }
-  }, [token, router, currentPathname]);
+  }, [isAuth, router]);
+
+  // Don't render form until mounted to prevent hydration issues
+  if (!isMounted) {
+    return (
+      <div className="flex flex-col flex-1 lg:w-1/2 w-full">
+        <div className="flex flex-col justify-center flex-1 w-full max-w-md mx-auto">
+          <div className="animate-pulse">
+            <div className="mb-5 sm:mb-8">
+              <div className="h-8 bg-gray-200 rounded dark:bg-gray-700 mb-2"></div>
+              <div className="h-4 bg-gray-200 rounded dark:bg-gray-700"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
 
   const handleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -64,7 +81,9 @@ export default function SignInForm() {
       return;
     }
 
-    setLoading(true); 
+    setLoading(true);
+
+    console.log('Login attempt:', { user_id, API_BASE_URL });
 
     try {
       const response = await axios.post(`${API_BASE_URL}auth/login`, {
@@ -72,20 +91,38 @@ export default function SignInForm() {
         password
       });
 
+      console.log('Login response:', response.data);
+
       const { token: receivedToken, message } = response.data;
 
       if (receivedToken) {
-        localStorage.setItem('token', receivedToken);
-        setToken(receivedToken);
-
-        router.push('/callpipeline');
+        console.log('Token received, calling login function');
+        // Use the centralized login function
+        login(receivedToken);
+        
+        // Fetch and store staff info
+        try {
+          await fetchAndStoreStaffInfo(receivedToken);
+          console.log('Staff info fetched successfully');
+        } catch (staffError) {
+          console.warn('Failed to fetch staff info:', staffError);
+          // Continue with login even if staff info fails
+        }
+        
+        // Add a small delay to ensure state is updated
+        setTimeout(() => {
+          console.log('Redirecting to /callpipeline');
+          router.push('/callpipeline');
+        }, 200);
       } else {
+        console.log('No token in response:', response.data);
         setLoginError(message || 'Login successful, but no token received from API.');
       }
     } catch (error) {
+      console.error('Login error details:', error);
       if (axios.isAxiosError(error) && error.response) {
-        setLoginError(error.response.data[0].message || 'Incorrect username or password.');
-        console.error("Login API Error Response:", error.response.data[0].message);
+        console.error('API error response:', error.response.data);
+        setLoginError(error.response.data[0]?.message || 'Incorrect username or password.');
       } else {
         setLoginError('An unexpected network error occurred. Please try again.');
         console.error("Login Network Error:", error);
@@ -188,6 +225,21 @@ export default function SignInForm() {
                   >
                     {loading ? 'Signing In...' : 'Sign in'}
                   </Button>
+                </div>
+                
+                {/* Temporary test button for debugging */}
+                <div className="text-center">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      console.log('Test button clicked');
+                      console.log('API_BASE_URL:', API_BASE_URL);
+                      console.log('Current values:', { user_id, password });
+                    }}
+                    className="text-xs text-gray-500 underline"
+                  >
+                    Debug Test
+                  </button>
                 </div>
               </div>
             </form>

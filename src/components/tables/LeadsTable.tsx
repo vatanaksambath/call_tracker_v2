@@ -55,6 +55,25 @@ const formatPhoneNumber = (phoneNumber: string): string => {
     return phoneNumber;
 };
 
+// Date formatting function to yyyy-mm-dd format
+const formatDateToYYYYMMDD = (dateString: string): string => {
+    if (!dateString) return 'N/A';
+    
+    try {
+        const date = new Date(dateString);
+        // Check if date is valid
+        if (isNaN(date.getTime())) return 'N/A';
+        
+        const year = date.getFullYear();
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const day = String(date.getDate()).padStart(2, '0');
+        
+        return `${year}-${month}-${day}`;
+    } catch {
+        return 'N/A';
+    }
+};
+
 interface ApiLeadData {
   lead_id: string;
   first_name: string;
@@ -103,6 +122,7 @@ export interface Lead {
 }
 
 const allColumns: { key: keyof Lead; label: string }[] = [
+    { key: 'id', label: 'Lead ID' },
     { key: 'fullName', label: 'Full Name' },
     { key: 'gender', label: 'Gender' },
     { key: 'phone', label: 'Primary Phone' },
@@ -367,8 +387,8 @@ const LeadsTable: React.FC<LeadsTableProps> = ({
                             avatar: lead.photo_url || "/images/user/user-02.jpg",
                             gender: lead.gender_name,
                             phone: primaryContact?.contact_number || 'N/A',
-                            dob: lead.date_of_birth,
-                            contactDate: new Date(lead.created_date).toLocaleDateString(),
+                            dob: formatDateToYYYYMMDD(lead.date_of_birth),
+                            contactDate: formatDateToYYYYMMDD(lead.created_date),
                             email: lead.email || 'N/A',
                             leadSource: lead.lead_source_name,
                             customerType: lead.customer_type_name,
@@ -405,15 +425,17 @@ const LeadsTable: React.FC<LeadsTableProps> = ({
 
     const renderCellContent = (lead: Lead, columnKey: keyof Lead) => {
         switch (columnKey) {
+            case 'id':
+                return (
+                    <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
+                        {lead.id}
+                    </span>
+                );
             case 'fullName':
                 return (
                     <div className="flex items-center gap-2">
-                        <div className="w-8 h-8 overflow-hidden rounded-full">
-                            <Image width={32} height={32} src={lead.avatar} alt={lead.fullName} onError={(e) => { e.currentTarget.src = "/images/user/user-02.jpg"; }}/>
-                        </div>
                         <div>
                             <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-300">{lead.fullName}</span>
-                            <span className="block text-gray-500 text-xs dark:text-gray-400 mt-0.5">{lead.email}</span>
                         </div>
                     </div>
                 );
@@ -563,8 +585,8 @@ export const useLeadData = (currentPage: number, pageSize: number = 10, searchQu
                             avatar: lead.photo_url || "/images/user/user-02.jpg",
                             gender: lead.gender_name,
                             phone: primaryContact?.contact_number || 'N/A',
-                            dob: lead.date_of_birth,
-                            contactDate: new Date(lead.created_date).toLocaleDateString(),
+                            dob: formatDateToYYYYMMDD(lead.date_of_birth),
+                            contactDate: formatDateToYYYYMMDD(lead.created_date),
                             email: lead.email || 'N/A',
                             leadSource: lead.lead_source_name,
                             customerType: lead.customer_type_name,

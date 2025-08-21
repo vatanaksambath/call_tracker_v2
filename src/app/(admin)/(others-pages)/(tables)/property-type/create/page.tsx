@@ -10,12 +10,9 @@ import Input from "@/components/form/input/InputField";
 import Label from "@/components/form/Label";
 import TextArea from "@/components/form/input/TextArea";
 import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
+import SuccessModal from "@/components/ui/modal/SuccessModal";
 
-interface AlertInfo {
-  variant: 'success' | 'error' | 'info';
-  title: string;
-  message: string;
-}
+
 
 const CreatePropertyTypePage: React.FC = () => {
   const router = useRouter();
@@ -38,7 +35,8 @@ const CreatePropertyTypePage: React.FC = () => {
 
   const [errors, setErrors] = useState<PropertyTypeFormErrors>({});
   const [isSaving, setIsSaving] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<AlertInfo | null>(null);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [errorModal, setErrorModal] = useState<{ open: boolean; statusCode?: number; message?: string }>({ open: false });
 
   const handleChange = (field: keyof typeof formData, value: string) => {
     setFormData(prev => ({ ...prev, [field]: value }));
@@ -80,20 +78,13 @@ const CreatePropertyTypePage: React.FC = () => {
       console.log("Property Type API Response:", response.data);
       
       if (response.data) {
-        setAlertInfo({
-          variant: 'success',
-          title: 'Success!',
-          message: 'Property type created successfully.'
-        });
-        setTimeout(() => {
-          router.push('/property-type');
-        }, 1500);
+        setShowSuccessModal(true);
       }
     } catch (error: unknown) {
       console.error('Error creating property type:', error);
-      setAlertInfo({
-        variant: 'error',
-        title: 'Error',
+      setErrorModal({
+        open: true,
+        statusCode: 500,
         message: 'Failed to create property type. Please try again.'
       });
     } finally {
@@ -104,23 +95,23 @@ const CreatePropertyTypePage: React.FC = () => {
   return (
     <>
       <LoadingOverlay isLoading={isSaving} />
-      {alertInfo && (
-        <div className="fixed top-5 right-5 z-[10000] w-full max-w-sm">
-          <div className={`p-4 rounded-md ${alertInfo.variant === 'success' ? 'bg-green-100 text-green-800' :
-              alertInfo.variant === 'error' ? 'bg-red-100 text-red-800' :
-                'bg-blue-100 text-blue-800'
-            }`}>
-            <h3 className="font-semibold">{alertInfo.title}</h3>
-            <p>{alertInfo.message}</p>
-            <button
-              onClick={() => setAlertInfo(null)}
-              className="mt-2 px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={() => {
+          setShowSuccessModal(false);
+          router.push('/property-type');
+        }}
+        statusCode={200}
+        message="Property type created successfully."
+        buttonText="Go to Property Type List"
+      />
+      <SuccessModal
+        isOpen={errorModal.open}
+        onClose={() => setErrorModal({ open: false })}
+        statusCode={errorModal.statusCode}
+        message={errorModal.message}
+        buttonText="Okay, Got It"
+      />
       <div>
         <PageBreadcrumb crumbs={breadcrumbs} />
         <div className="space-y-6">

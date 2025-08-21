@@ -115,7 +115,15 @@ export default function ViewSiteVisitPage() {
       console.log("Parsed visitArr:", visitArr);
       
       if (visitArr.length > 0) {
-        setSiteVisitData(visitArr[0]);
+        const siteVisit = visitArr[0];
+        // Filter out empty photo URLs and ensure it's an array
+        if (siteVisit.photo_url && Array.isArray(siteVisit.photo_url)) {
+          siteVisit.photo_url = siteVisit.photo_url.filter((url: string) => url && url.trim() !== '');
+        } else {
+          siteVisit.photo_url = [];
+        }
+        console.log("✅ Site visit after photo filtering:", siteVisit);
+        setSiteVisitData(siteVisit);
       } else {
         setError("Site visit not found");
       }
@@ -137,6 +145,17 @@ export default function ViewSiteVisitPage() {
   useEffect(() => {
     loadSiteVisitData();
   }, [loadSiteVisitData]);
+
+  // Reset photo index when site visit data changes or photos are filtered
+  useEffect(() => {
+    if (siteVisitData?.photo_url) {
+      if (siteVisitData.photo_url.length === 0 || currentPhotoIndex >= siteVisitData.photo_url.length) {
+        setCurrentPhotoIndex(0);
+      }
+    } else {
+      setCurrentPhotoIndex(0);
+    }
+  }, [siteVisitData?.photo_url, currentPhotoIndex]);
 
   // Helper functions
   const formatDate = (dateString: string | null): string => {
@@ -511,16 +530,33 @@ export default function ViewSiteVisitPage() {
                 {/* Photo Display Area */}
                 <div className="relative bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800">
                   <div className="relative w-full h-80 md:h-96">
-                    <Image
-                      src={siteVisitData.photo_url[currentPhotoIndex]}
-                      alt={`Site visit photo ${currentPhotoIndex + 1}`}
-                      fill
-                      className="object-contain p-4"
-                      onError={(e) => {
-                        const target = e.target as HTMLImageElement;
-                        target.src = '/images/placeholder-image.png'; // fallback image
-                      }}
-                    />
+                    {siteVisitData.photo_url && 
+                     siteVisitData.photo_url.length > 0 && 
+                     currentPhotoIndex < siteVisitData.photo_url.length &&
+                     siteVisitData.photo_url[currentPhotoIndex] && 
+                     siteVisitData.photo_url[currentPhotoIndex].trim() !== '' ? (
+                      <Image
+                        src={siteVisitData.photo_url[currentPhotoIndex]}
+                        alt={`Site visit photo ${currentPhotoIndex + 1}`}
+                        fill
+                        className="object-contain p-4"
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none'; // Hide broken image
+                        }}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-full">
+                        <div className="text-center">
+                          <div className="w-16 h-16 mx-auto mb-4 bg-gray-200 dark:bg-gray-700 rounded-lg flex items-center justify-center">
+                            <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                            </svg>
+                          </div>
+                          <p className="text-gray-500 dark:text-gray-400">No image available</p>
+                        </div>
+                      </div>
+                    )}
                     
                     {/* Navigation Arrows - Only show if more than 1 photo */}
                     {siteVisitData.photo_url.length > 1 && (
@@ -648,17 +684,34 @@ export default function ViewSiteVisitPage() {
             {/* Main Photo */}
             <div className="w-full h-full flex items-center justify-center">
               <div className="relative max-w-full max-h-full">
-                <Image
-                  src={siteVisitData.photo_url[currentPhotoIndex]}
-                  alt={`Site visit photo ${currentPhotoIndex + 1}`}
-                  width={800}
-                  height={600}
-                  className={`${isFullscreen ? 'max-w-full max-h-full' : 'max-w-full max-h-full'} object-contain`}
-                  onError={(e) => {
-                    const target = e.target as HTMLImageElement;
-                    target.src = '/images/placeholder-image.png'; // fallback image
-                  }}
-                />
+                {siteVisitData.photo_url && 
+                 siteVisitData.photo_url.length > 0 && 
+                 currentPhotoIndex < siteVisitData.photo_url.length &&
+                 siteVisitData.photo_url[currentPhotoIndex] && 
+                 siteVisitData.photo_url[currentPhotoIndex].trim() !== '' ? (
+                  <Image
+                    src={siteVisitData.photo_url[currentPhotoIndex]}
+                    alt={`Site visit photo ${currentPhotoIndex + 1}`}
+                    width={800}
+                    height={600}
+                    className={`${isFullscreen ? 'max-w-full max-h-full' : 'max-w-full max-h-full'} object-contain`}
+                    onError={(e) => {
+                      const target = e.target as HTMLImageElement;
+                      target.style.display = 'none'; // Hide broken image
+                    }}
+                  />
+                ) : (
+                  <div className="flex items-center justify-center w-96 h-96 bg-gray-200 dark:bg-gray-700 rounded-lg">
+                    <div className="text-center">
+                      <div className="w-16 h-16 mx-auto mb-4 bg-gray-300 dark:bg-gray-600 rounded-lg flex items-center justify-center">
+                        <svg className="w-8 h-8 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                        </svg>
+                      </div>
+                      <p className="text-gray-500 dark:text-gray-400">No image available</p>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 

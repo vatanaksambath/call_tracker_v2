@@ -77,10 +77,10 @@ const othersItems: NavItem[] = [
     name: "Settings",
     subItems: [
       { name: "Property Type", path: "/property-type", pro: false },
-      { name: "developer", path: "/developer", pro: false },
+      // { name: "developer", path: "/developer", pro: false },
       { name: "project", path: "/project", pro: false },
-      { name: "location", path: "/location", pro: false },
-      { name: "Channel", path: "/channel", pro: false },
+      // { name: "location", path: "/location", pro: false },
+      // { name: "Channel", path: "/channel", pro: false },
       { name: "Staff", path: "/staff", pro: false },
       // { name: "alerts", path: "/alerts", pro: false },
       // { name: "Avatar", path: "/avatars", pro: false },

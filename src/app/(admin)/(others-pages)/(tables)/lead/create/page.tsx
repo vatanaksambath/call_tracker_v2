@@ -12,6 +12,7 @@ import DatePicker from "@/components/form/date-picker";
 import TextArea from "@/components/form/input/TextArea";
 import ImageUpload from "@/components/form/ImageUpload";
 import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
+import SuccessModal from "@/components/ui/modal/SuccessModal";
 import { EnvelopeIcon } from "@/icons";
 import axios from "axios";
 import Address, { IAddress } from "@/components/form/Address";
@@ -23,11 +24,7 @@ interface SelectOption {
     label: string;
 }
 
-interface AlertInfo {
-  variant: 'success' | 'error' | 'info';
-  title: string;
-  message: string;
-}
+
 
 export default function CreateLeadPage() {
   const router = useRouter();
@@ -70,7 +67,9 @@ export default function CreateLeadPage() {
   const [leadSourceOptions, setLeadSourceOptions] = useState<SelectOption[]>([]);
   const [customerTypeOptions, setCustomerTypeOptions] = useState<SelectOption[]>([]);
   const [isSaving, setIsSaving] = useState(false);
-  const [alertInfo, setAlertInfo] = useState<AlertInfo | null>(null);
+  // Removed alertInfo, now using errorModal for all error feedback
+  const [showSuccess, setShowSuccess] = useState(false);
+  const [errorModal, setErrorModal] = useState<{ open: boolean; statusCode?: number; message?: string }>({ open: false });
 
   const dropdownOptions = {
     gender: [
@@ -185,19 +184,19 @@ export default function CreateLeadPage() {
   
   const handleSave = async () => { 
     const tokenUser = getUserFromToken();
-    if (!validate() || !tokenUser?.user_id) {
-        if (!tokenUser?.user_id) {
-            setAlertInfo({ 
-                variant: 'error', 
-                title: 'Authentication Error', 
-                message: 'Could not find user information. Please log in again.' 
-            });
-            setTimeout(() => {
-              router.push("/signin");
-          }, 2000);
+        if (!validate() || !tokenUser?.user_id) {
+            if (!tokenUser?.user_id) {
+                setErrorModal({
+                  open: true,
+                  statusCode: 401,
+                  message: 'Could not find user information. Please log in again.'
+                });
+                setTimeout(() => {
+                  router.push("/signin");
+                }, 2000);
+            }
+            return;
         }
-        return;
-    }
     
     setIsSaving(true);
     try {
@@ -262,82 +261,79 @@ export default function CreateLeadPage() {
         
         // Check if the response indicates success
         if (createLead.status === 200 || createLead.status === 201) {
-          setAlertInfo({ 
-            variant: 'success', 
-            title: 'Success!', 
-            message: 'Lead has been created successfully.' 
-          });
-          setTimeout(() => {
-            router.push("/lead");
-          }, 1500);
+          setShowSuccess(true);
         } else {
           // Handle error response
-          const errorMessage = createLead.data?.message || 'Failed to create lead';
-          setAlertInfo({
-            variant: 'error',
-            title: 'Error',
-            message: errorMessage
+          setErrorModal({
+            open: true,
+            statusCode: createLead.status,
+            message: createLead.data?.message || 'Failed to create lead',
           });
         }
-    } catch (error: unknown) {
-        console.error('Error creating lead:', error);
-        setAlertInfo({ 
-          variant: 'error', 
-          title: 'Save Failed', 
-          message: 'An error occurred while saving the lead. Please try again.' 
-        });
-    } finally {
-        setIsSaving(false);
-    }
+  } catch (error: unknown) {
+    console.error('Error creating lead:', error);
+    setErrorModal({
+      open: true,
+      statusCode: 500,
+      message: 'An error occurred while saving the lead. Please try again.'
+    });
+  } finally {
+    setIsSaving(false);
+  }
   };
   const handleCancel = () => { router.push("/lead"); };
 
   return (
     <>
+      {/* Use the full-page LoadingOverlay for all loading states */}
       <LoadingOverlay isLoading={isSaving} />
-      {alertInfo && (
-        <div className="fixed top-5 right-5 z-[10000] w-full max-w-sm">
-          <div className={`p-4 rounded-md ${alertInfo.variant === 'success' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'}`}>
-            <h3 className="font-semibold">{alertInfo.title}</h3>
-            <p>{alertInfo.message}</p>
-            <button 
-              onClick={() => setAlertInfo(null)}
-              className="mt-2 px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded hover:bg-gray-300"
-            >
-              Close
-            </button>
-          </div>
-        </div>
-      )}
+      {/* Universal Success Modal */}
+      <SuccessModal
+        isOpen={showSuccess}
+        onClose={() => {
+          setShowSuccess(false);
+          router.push("/lead");
+        }}
+        statusCode={200}
+        message="The lead has been created successfully."
+        buttonText="Go to Lead List"
+      />
+      {/* Error Modal */}
+      <SuccessModal
+        isOpen={errorModal.open}
+        onClose={() => setErrorModal({ open: false })}
+        statusCode={errorModal.statusCode}
+        message={errorModal.message}
+        buttonText="Okay, Got It"
+      />
+      {/* Main content remains unchanged */}
       <div>
         <PageBreadcrumb crumbs={breadcrumbs} />
         <div className="space-y-6">
-        <ComponentCard title="Create New Lead">
-          <div className="relative">
-            {/* Header Status Bar */}
-            <div className="mb-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-l-4 border-blue-500 p-3 rounded-r-lg">
-              <div className="flex items-center gap-3">
-                <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
-                  <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-                  </svg>
+          <ComponentCard title="Create New Lead">
+            <div className="relative">
+              {/* Header Status Bar */}
+              <div className="mb-4 bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/20 dark:to-indigo-900/20 border-l-4 border-blue-500 p-3 rounded-r-lg">
+                <div className="flex items-center gap-3">
+                  <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center">
+                    <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
+                    </svg>
+                  </div>
+                  <div>
+                    <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Creating New Lead</p>
+                    <p className="text-xs text-blue-600 dark:text-blue-300">Fill in the information below to create a new lead record</p>
+                  </div>
                 </div>
-                <div>
-                  <p className="text-sm font-medium text-blue-800 dark:text-blue-200">Creating New Lead</p>
-                  <p className="text-xs text-blue-600 dark:text-blue-300">Fill in the information below to create a new lead record</p>
+              </div>
+              {/* Ribbon Style Badge */}
+              <div className="absolute top-0 left-0 z-10">
+                <div className="bg-blue-500 text-white px-4 py-1 text-sm font-semibold shadow-lg transform -rotate-45 -translate-x-8 -translate-y-4">
+                  NEW
                 </div>
               </div>
             </div>
-            
-            {/* Ribbon Style Badge */}
-            <div className="absolute top-0 left-0 z-10">
-              <div className="bg-blue-500 text-white px-4 py-1 text-sm font-semibold shadow-lg transform -rotate-45 -translate-x-8 -translate-y-4">
-                NEW
-              </div>
-            </div>
-          </div>
-          
-          <form className="flex flex-col" noValidate onSubmit={(e) => { e.preventDefault(); handleSave() }}>
+            <form className="flex flex-col" noValidate onSubmit={(e) => { e.preventDefault(); handleSave() }}>
               <div className="px-2 pb-3">
                 {/* Photo Upload Section */}
                 <div className="col-span-2 lg:col-span-3 pb-6">
@@ -349,7 +345,6 @@ export default function CreateLeadPage() {
                     Upload Profile Picture
                   </p>
                 </div>
-                
                 {/* Personal Information */}
                 <div className="mb-8 p-4 border border-gray-200 rounded-lg dark:border-gray-700">
                   <h3 className="text-base font-medium mb-4 text-gray-800 dark:text-gray-200">Personal Information</h3>
@@ -359,13 +354,11 @@ export default function CreateLeadPage() {
                       <Input type="text" placeholder="Enter first name" value={formData.firstName} onChange={(e) => handleChange("firstName", e.target.value)} />
                       {errors.firstName && <p className="text-sm text-red-500 mt-1">{errors.firstName}</p>}
                     </div>
-
                     <div className="col-span-2 lg:col-span-1">
                       <Label>Last Name</Label>
                       <Input type="text" placeholder="Enter last name" value={formData.lastName} onChange={(e) => handleChange("lastName", e.target.value)} />
                       {errors.lastName && <p className="text-sm text-red-500 mt-1">{errors.lastName}</p>}
                     </div>
-
                     <div className="col-span-2 lg:col-span-1">
                       <Label>Gender</Label>
                       <Select 
@@ -376,12 +369,10 @@ export default function CreateLeadPage() {
                       />
                       {errors.gender && <p className="text-sm text-red-500 mt-1">{errors.gender}</p>}
                     </div>
-
                     <div className="col-span-2 lg:col-span-1">
                       <DatePicker id="date-picker-dob" label="Date of Birth" placeholder="Select a date" value={formData.dob || undefined} onChange={(dates) => handleChange("dob", dates[0])} />
                       {errors.dob && <p className="text-sm text-red-500 mt-1">{errors.dob}</p>}
                     </div>
-
                     <div className="col-span-2 lg:col-span-1">
                       <Label>Email</Label>
                       <div className="relative">
@@ -390,7 +381,6 @@ export default function CreateLeadPage() {
                       </div>
                       {errors.email && <p className="text-sm text-red-500 mt-1">{errors.email}</p>}
                     </div>
-
                     <div className="col-span-2 lg:col-span-1">
                       <Label>Occupation</Label>
                       <Input type="text" placeholder="Enter occupation" value={formData.occupation} onChange={(e) => handleChange("occupation", e.target.value)} />
@@ -398,7 +388,6 @@ export default function CreateLeadPage() {
                     </div>
                   </div>
                 </div>
-
                 {/* Business Information */}
                 <div className="mb-8 p-4 border border-gray-200 rounded-lg dark:border-gray-700">
                   <h3 className="text-base font-medium mb-4 text-gray-800 dark:text-gray-200">Business Information</h3>
@@ -408,26 +397,22 @@ export default function CreateLeadPage() {
                       <Select options={leadSourceOptions} value={formData.leadSource || undefined} onChange={(selectedOption) => handleChange("leadSource", selectedOption)} className="dark:bg-dark-900" />
                       {errors.leadSource && <p className="text-sm text-red-500 mt-1">{errors.leadSource}</p>}
                     </div>
-
                     <div className="col-span-2 lg:col-span-1">
                       <Label>Customer Type</Label>
                       <Select options={customerTypeOptions} value={formData.customerType || undefined} onChange={(selectedOption) => handleChange("customerType", selectedOption)} className="dark:bg-dark-900" />
                       {errors.customerType && <p className="text-sm text-red-500 mt-1">{errors.customerType}</p>}
                     </div>
-
                     <div className="col-span-2 lg:col-span-1">
                       <Label>Business</Label>
                       <Select options={businessOptions} value={formData.business || undefined} onChange={(selectedOption) => handleChange("business", selectedOption)} className="dark:bg-dark-900" />
                       {errors.business && <p className="text-sm text-red-500 mt-1">{errors.business}</p>}
                     </div>
-
                     <div className="col-span-2 lg:col-span-1">
                       <DatePicker id="date-picker-contactDate" label="Contact Date" placeholder="Select a date" value={formData.contactDate || undefined} onChange={(dates) => handleChange("contactDate", dates[0])} />
                       {errors.dob && <p className="text-sm text-red-500 mt-1">{errors.contactDate}</p>}
                     </div>
                   </div>
                 </div>
-
                 {/* Contact & Address Information */}
                 <div className="mb-8 p-4 border border-gray-200 rounded-lg dark:border-gray-700">
                   <h3 className="text-base font-medium mb-4 text-gray-800 dark:text-gray-200">Contact & Address Information</h3>
@@ -439,7 +424,6 @@ export default function CreateLeadPage() {
                           error={errors.contact_data}
                       />
                     </div>
-
                     <div>
                         <Address 
                           value={formData.address}
@@ -447,7 +431,6 @@ export default function CreateLeadPage() {
                           error={errors.address}
                         />
                     </div>
-     
                     <div>
                       <Label>Remark</Label>
                       <TextArea value={formData.remark} onChange={(value) => handleChange("remark", value)} rows={3} />
@@ -455,13 +438,12 @@ export default function CreateLeadPage() {
                   </div>
                 </div>
               </div>
-
               <div className="flex items-center gap-3 mt-6 justify-end">
                 <Button size="md" variant="outline" type="button" onClick={handleCancel}>Cancel</Button>
                 <Button size="md" type="submit">Save Lead</Button>
               </div>
-          </form>
-        </ComponentCard>
+            </form>
+          </ComponentCard>
         </div>
       </div>
     </>

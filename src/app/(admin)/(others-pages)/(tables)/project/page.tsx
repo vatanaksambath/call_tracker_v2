@@ -1,3 +1,4 @@
+import { Project } from "@/components/form/sample-data/projectData";
 "use client";
 import ComponentCard from "@/components/common/ComponentCard";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
@@ -8,10 +9,9 @@ import Link from "next/link";
 import { 
   PlusIcon,
   BuildingOffice2Icon,
-  CheckCircleIcon,
-  MapPinIcon 
+  CheckCircleIcon
 } from "@heroicons/react/24/outline";
-import { Project, projectData } from "@/components/form/sample-data/projectData";
+
 
 const breadcrumbs = [
     { name: "Home", href: "/" },
@@ -19,6 +19,7 @@ const breadcrumbs = [
 ];
 
 export default function ProjectPage() {
+
   const [searchTerm, setSearchTerm] = useState("");
   const [visibleColumns, setVisibleColumns] = useState<(keyof Project)[]>(() => {
     if (typeof window !== 'undefined') {
@@ -32,24 +33,42 @@ export default function ProjectPage() {
     localStorage.setItem('projectTableVisibleColumns', JSON.stringify(visibleColumns));
   }, [visibleColumns]);
 
-  // Calculate project statistics
-  const totalProjects = projectData.length;
-  const activeProjects = projectData.filter(proj => proj.is_active).length;
-  const totalProperties = projectData.reduce((sum, proj) => sum + (proj.properties || 0), 0);
-
+  // Project statistics from API
+  const [totalProjects, setTotalProjects] = useState(0);
+  const [activeProjects, setActiveProjects] = useState(0);
   useEffect(() => {
-    // Log the statistics to the console (or handle them as needed)
-    console.log("Total Projects:", totalProjects);
-    console.log("Active Projects:", activeProjects);
-    console.log("Total Properties:", totalProperties);
-  }, [totalProjects, activeProjects, totalProperties]);
+    const fetchStats = async () => {
+      try {
+        const body = {
+          page_number: "1",
+          page_size: "1000", // Large page size to get all for stats
+          search_type: '',
+          query_search: '',
+        };
+        const api = (await import('@/lib/api')).default;
+        const response = await api.post('/project/pagination', body);
+        const apiResult = response.data[0];
+        if (apiResult && Array.isArray(apiResult.data)) {
+          setTotalProjects(apiResult.total_row || apiResult.data.length);
+          setActiveProjects(apiResult.data.filter((proj: { is_active: boolean }) => proj.is_active).length);
+        } else {
+          setTotalProjects(0);
+          setActiveProjects(0);
+        }
+      } catch {
+        setTotalProjects(0);
+        setActiveProjects(0);
+      }
+    };
+    fetchStats();
+  }, []);
 
   return (
     <div className="space-y-6">
       <PageBreadcrumb crumbs={breadcrumbs} />
       
       {/* Project Statistics Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
         <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-6">
           <div className="flex items-center justify-between">
             <div>
@@ -70,18 +89,6 @@ export default function ProjectPage() {
             </div>
             <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-green-50 dark:bg-green-500/10">
               <CheckCircleIcon className="h-6 w-6 text-green-600 dark:text-green-400" />
-            </div>
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-dark-800 rounded-xl border border-gray-200 dark:border-white/[0.05] p-6">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-medium text-gray-600 dark:text-gray-400">Total Properties</p>
-              <p className="text-2xl font-bold text-gray-900 dark:text-white">{totalProperties}</p>
-            </div>
-            <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-50 dark:bg-blue-500/10">
-              <MapPinIcon className="h-6 w-6 text-blue-600 dark:text-blue-400" />
             </div>
           </div>
         </div>

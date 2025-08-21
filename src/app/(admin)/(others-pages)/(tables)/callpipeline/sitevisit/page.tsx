@@ -1,10 +1,19 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+
+// Components
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
 import Button from "@/components/ui/button/Button";
-import { ChevronLeftIcon, ChevronRightIcon, EyeIcon, PencilIcon, TrashIcon, EllipsisHorizontalIcon } from "@heroicons/react/24/outline";
+import Label from "@/components/form/Label";
+import Select from "@/components/form/Select";
+import DatePicker from "@/components/form/date-picker";
+import TextArea from "@/components/form/input/TextArea";
+import InputField from "@/components/form/input/InputField";
+import PhotoUpload, { PhotoFile } from "@/components/form/PhotoUpload";
+import { Modal } from "@/components/ui/modal";
 import {
   Table,
   TableBody,
@@ -12,9 +21,22 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import Badge from "@/components/ui/badge/Badge";
-import { Modal } from "@/components/ui/modal";
 
+// Icons  
+import { TimeIcon } from "@/icons";
+import { 
+  ChevronLeftIcon, 
+  ChevronRightIcon, 
+  EyeIcon, 
+  PencilIcon, 
+  TrashIcon, 
+  EllipsisHorizontalIcon 
+} from "@heroicons/react/24/outline";
+
+// Utils and Helpers
+import { getApiBase, getApiHeaders } from "@/lib/apiHelpers";
+
+// Types and Interfaces
 interface SelectOption {
   value: string;
   label: string;
@@ -35,23 +57,178 @@ interface PipelineInfo {
 }
 
 interface SiteVisitEntry {
-  visitPipelineID: number;
-  visitLogOrderID: number;
-  visitDate: string;
+  site_visit_id: string;
+  call_id: string;
+  property_profile_id: number;
+  property_profile_name: string;
+  staff_id: number;
+  staff_name: string;
+  lead_id: string;
+  lead_name: string;
+  contact_result_id: number;
+  contact_result_name: string;
+  purpose: string;
+  start_datetime: string;
+  end_datetime: string;
+  photo_url: string[];
+  remark: string;
+  is_active: boolean;
+  created_date: string;
+  created_by_name: string;
+  last_update: string | null;
+  updated_by_name: string;
+}
+
+interface SiteVisitFormData {
+  visitDate: Date;
   visitStartTime: string;
   visitEndTime: string;
-  visitStatus: string;
-  visitType: string;
-  attendees: string;
+  contactResult: SelectOption | null;
+  purpose: string;
   notes: string;
-  createdAt: string;
-  lastUpdate: string;
-  // Additional fields from API
-  siteVisitId?: string;
-  propertyProfileName?: string;
-  contactResultName?: string;
-  photoUrls?: string[];
+  isFollowUp: boolean;
+  followUpDate: Date | null;
 }
+
+interface SiteVisitPaginationResponse {
+  message: string;
+  error: null | string;
+  status_code: number;
+  total_row: number;
+  data: SiteVisitEntry[];
+}
+
+// Constants
+const CONTACT_RESULT_STYLES = {
+  'Completed': 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300',
+  'No Answer': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300',
+  'Voicemail': 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300',
+  'Busy': 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300',
+  'Failed': 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300',
+  'Interest': 'bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-300',
+  'Callback': 'bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-300',
+  'Schedule Site Visit': 'bg-indigo-100 text-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-300',
+  'Cancelled': 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300',
+} as const;
+
+const DEFAULT_FORM_DATA: SiteVisitFormData = {
+  visitDate: new Date(),
+  visitStartTime: '',
+  visitEndTime: '',
+  contactResult: null,
+  purpose: '',
+  notes: '',
+  isFollowUp: false,
+  followUpDate: null,
+};
+
+// Utility Functions
+const formatDate = (dateString: string): string => {
+  if (!dateString || dateString === 'N/A') return 'N/A';
+  try {
+    const date = new Date(dateString);
+    return date.toISOString().split('T')[0];
+  } catch {
+    return 'N/A';
+  }
+};
+
+const formatTime = (timeString: string): string => {
+  if (!timeString || timeString === 'N/A') return 'N/A';
+  try {
+    if (timeString.includes(':') && !timeString.includes('T')) {
+      const [hours, minutes] = timeString.split(':');
+      const date = new Date();
+      date.setHours(parseInt(hours), parseInt(minutes), 0);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+    if (timeString.includes('T')) {
+      const date = new Date(timeString);
+      return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: true });
+    }
+    return timeString;
+  } catch {
+    return 'N/A';
+  }
+};
+
+const formatDuration = (minutes: number): string => {
+  if (!minutes || minutes === 0) return '0 min';
+  const hours = Math.floor(minutes / 60);
+  const mins = minutes % 60;
+  return hours > 0 ? `${hours}h ${mins}m` : `${mins} min`;
+};
+
+const formatPhoneNumber = (phone: string): string => {
+  if (!phone || phone === 'N/A') return 'N/A';
+  
+  // Remove all non-digit characters
+  const cleaned = phone.replace(/\D/g, '');
+  
+  if (cleaned.length === 0) return 'N/A';
+  
+  // Handle different phone number formats
+  if (cleaned.startsWith('855')) {
+    // Already has country code 855
+    const localNumber = cleaned.substring(3);
+    if (localNumber.length >= 8) {
+      // Format: (+855) XXX-XXX-XXXX
+      return `(+855) ${localNumber.slice(0, 3)}-${localNumber.slice(3, 6)}-${localNumber.slice(6)}`;
+    }
+  } else if (cleaned.length >= 8 && cleaned.length <= 9) {
+    // Local Cambodian number without country code
+    // Add country code and format: (+855) XXX-XXX-XXXX
+    return `(+855) ${cleaned.slice(0, 3)}-${cleaned.slice(3, 6)}-${cleaned.slice(6)}`;
+  } else if (cleaned.length >= 10) {
+    // International number with different country code
+    const countryCode = cleaned.slice(0, cleaned.length - 9);
+    const localNumber = cleaned.slice(cleaned.length - 9);
+    return `(+${countryCode}) ${localNumber.slice(0, 3)}-${localNumber.slice(3, 6)}-${localNumber.slice(6)}`;
+  }
+  
+  // If we can't format it properly, return original
+  return phone;
+};
+
+const getContactResultStyle = (resultName: string): string => {
+  return CONTACT_RESULT_STYLES[resultName as keyof typeof CONTACT_RESULT_STYLES] || 
+         'bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300';
+};
+
+const validateFormData = (data: SiteVisitFormData): Record<string, string> => {
+  const errors: Record<string, string> = {};
+  
+  if (!data.visitDate) errors.visitDate = 'Visit date is required';
+  if (!data.visitStartTime) errors.visitStartTime = 'Start time is required';
+  if (!data.contactResult) errors.contactResult = 'Contact result is required';
+  if (!data.notes.trim()) errors.notes = 'Notes are required';
+  
+  if (data.visitStartTime && data.visitEndTime) {
+    const startTime = new Date(`2000-01-01T${data.visitStartTime}`);
+    const endTime = new Date(`2000-01-01T${data.visitEndTime}`);
+    if (endTime <= startTime) {
+      errors.visitEndTime = 'End time must be after start time';
+    }
+  }
+  
+  if (data.isFollowUp && !data.followUpDate) {
+    errors.followUpDate = 'Follow-up date is required';
+  }
+  
+  return errors;
+};
+
+// Utility function to count valid photo URLs
+const getValidPhotoCount = (photoUrls: string[] | null | undefined): number => {
+  if (!photoUrls || !Array.isArray(photoUrls)) return 0;
+  return photoUrls.filter((url: string) => url && url.trim() !== '').length;
+};
+
+// Utility function to filter valid photo URLs
+const getValidPhotoUrls = (photoUrls: string[] | null | undefined): string[] => {
+  if (!photoUrls || !Array.isArray(photoUrls)) return [];
+  return photoUrls.filter((url: string) => url && url.trim() !== '');
+};
 
 export default function SiteVisitPage() {
   const router = useRouter();
@@ -61,14 +238,98 @@ export default function SiteVisitPage() {
   const breadcrumbs = [
     { name: "Home", href: "/" },
     { name: "Call Pipeline", href: "/callpipeline" },
-    { name: "Site Visit History" },
+    { name: "Site Visit Management" },
   ];
 
+  // State Management
   const [pipelineInfo, setPipelineInfo] = useState<PipelineInfo | null>(null);
   const [isLoadingPipeline, setIsLoadingPipeline] = useState(true);
   const [siteVisitHistory, setSiteVisitHistory] = useState<SiteVisitEntry[]>([]);
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true);
+  const [statusOptions, setStatusOptions] = useState<SelectOption[]>([]);
+  const [isLoadingStatus, setIsLoadingStatus] = useState(true);
 
-  // Load pipeline information and site visit history by ID
+  // Statistics State
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalDuration, setTotalDuration] = useState(0);
+  const [currentSiteVisitId, setCurrentSiteVisitId] = useState<string>('');
+  const [lastVisitLead, setLastVisitLead] = useState<{ name: string; phone: string }>({ name: '', phone: '' });
+
+  // Form State
+  const [formData, setFormData] = useState<SiteVisitFormData>(DEFAULT_FORM_DATA);
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [photos, setPhotos] = useState<PhotoFile[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Edit Form State
+  const [editFormData, setEditFormData] = useState<SiteVisitFormData>(DEFAULT_FORM_DATA);
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [editPhotos, setEditPhotos] = useState<PhotoFile[]>([]);
+  const [isEditingSubmitting, setIsEditingSubmitting] = useState(false);
+  const [editingVisit, setEditingVisit] = useState<SiteVisitEntry | null>(null);
+
+  // Modal State
+  const [showQuickModal, setShowQuickModal] = useState(false);
+  const [showEditModal, setShowEditModal] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(10);
+
+  // Load status options from API
+  const loadStatusOptions = useCallback(async () => {
+    try {
+      setIsLoadingStatus(true);
+
+      const response = await fetch(`${getApiBase()}/contact-result/pagination`, {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify({ 
+          page_number: "1", 
+          page_size: "10",
+          menu_id: "MU_02",
+          search_type: "",
+          query_search: ""
+        })
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        let options: SelectOption[] = [];
+
+        if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
+          options = data[0].data.map((item: any) => ({
+            value: String(item.contact_result_id || item.id),
+            label: String(item.contact_result_name || item.name)
+          }));
+        } else if (Array.isArray(data?.data)) {
+          options = data.data.map((item: any) => ({
+            value: String(item.contact_result_id || item.id),
+            label: String(item.contact_result_name || item.name)
+          }));
+        } else if (Array.isArray(data)) {
+          options = data.map((item: any) => ({
+            value: String(item.contact_result_id || item.id),
+            label: String(item.contact_result_name || item.name)
+          }));
+        }
+
+        setStatusOptions(options);
+      }
+    } catch (error) {
+      console.error("Error loading status options:", error);
+      setStatusOptions([
+        { value: "1", label: "No Answer" },
+        { value: "2", label: "Busy" },
+        { value: "9", label: "Completed" }
+      ]);
+    } finally {
+      setIsLoadingStatus(false);
+    }
+  }, []);
+
+  // Load pipeline information
   const loadPipelineInfo = useCallback(async () => {
     if (!pipelineId) {
       setIsLoadingPipeline(false);
@@ -76,12 +337,6 @@ export default function SiteVisitPage() {
     }
 
     try {
-      // Use the same approach as quickcall page with direct fetch
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      
       const body = {
         page_number: "1",
         page_size: "10",
@@ -89,19 +344,15 @@ export default function SiteVisitPage() {
         query_search: pipelineId,
       };
       
-      console.log("Making API call to:", `${apiBase}/call-log/pagination`);
-      console.log("Request body:", body);
-      
-      const res = await fetch(`${apiBase}/call-log/pagination`, {
+      const res = await fetch(`${getApiBase()}/call-log/pagination`, {
         method: "POST",
-        headers,
+        headers: getApiHeaders(),
         body: JSON.stringify(body),
       });
       
       if (!res.ok) throw new Error("Failed to fetch call log data");
       
       const data = await res.json();
-      console.log("API Response:", data);
       
       let logArr = [];
       if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
@@ -112,128 +363,56 @@ export default function SiteVisitPage() {
         logArr = data.results;
       }
       
-      console.log("Parsed logArr:", logArr);
-      
       if (logArr.length > 0) {
         const log = logArr[0];
-        console.log("Raw log object:", log);
         
-        // Set pipeline info using the same structure as quickcall page
+        // Debug: Log the call log structure
+        console.log("🔍 Call Log Structure:", JSON.stringify(log, null, 2));
+        
+        // Extract lead phone number from call_log_details > contact_data where channel_type_id is 3
+        let leadPhone = 'N/A';
+        if (log.call_log_details && Array.isArray(log.call_log_details)) {
+          // Look through all call log details to find contact data
+          for (const callDetail of log.call_log_details) {
+            console.log("📞 Checking call detail:", callDetail.call_log_detail_id);
+            if (callDetail.contact_data && Array.isArray(callDetail.contact_data)) {
+              for (const contactGroup of callDetail.contact_data) {
+                console.log("📱 Checking contact group:", contactGroup);
+                if (contactGroup.channel_type_id === 3) {
+                  console.log("✅ Found channel_type_id = 3, checking contact_values...");
+                  if (contactGroup.contact_values && Array.isArray(contactGroup.contact_values)) {
+                    for (const contactValue of contactGroup.contact_values) {
+                      console.log("📞 Checking contact_value:", contactValue);
+                      if (contactValue.contact_number) {
+                        leadPhone = contactValue.contact_number;
+                        console.log("✅ Found phone number:", leadPhone);
+                        break;
+                      }
+                    }
+                  }
+                }
+                if (leadPhone !== 'N/A') break;
+              }
+            }
+            if (leadPhone !== 'N/A') break;
+          }
+        }
+        
+        console.log("📱 Final extracted phone number:", leadPhone);
+        
         setPipelineInfo({
           pipelineId: log.call_log_id || "",
           pipelineName: `${log.lead_name || 'Unknown Lead'} - ${log.property_profile_name || 'Unknown Property'}`,
           leadId: log.lead_id || "",
           leadName: log.lead_name || "Unknown Lead",
-          leadCompany: "N/A", // Not available in current API
+          leadCompany: "N/A",
           propertyName: log.property_profile_name || "Unknown Property",
-          propertyLocation: "N/A", // Not available in current API
+          propertyLocation: "N/A",
           propertyProfileId: log.property_profile_id || "",
           callerName: log.created_by_name || "Unknown Creator",
-          callerPhone: "N/A", // Not available in current API
+          callerPhone: leadPhone,
           callerId: log.current_staff_id || ""
         });
-        
-        // Load site visit history inline to avoid dependency issues
-        try {
-          const visitBody = {
-            page_number: "1",
-            page_size: "100", // Get more entries for history
-            search_type: "call_log_id",
-            query_search: pipelineId,
-          };
-          
-          console.log("Making API call to:", `${apiBase}/site-visit/pagination`);
-          console.log("Request body:", visitBody);
-          
-          const visitRes = await fetch(`${apiBase}/site-visit/pagination`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify(visitBody),
-          });
-          
-          if (visitRes.ok) {
-            const visitData = await visitRes.json();
-            console.log("Site Visit API Response:", visitData);
-            
-            // Handle the site visit API response format - it's an array with data object
-            let visitArr = [];
-            if (Array.isArray(visitData) && visitData.length > 0 && visitData[0].data) {
-              visitArr = visitData[0].data;
-            } else if (Array.isArray(visitData?.data)) {
-              visitArr = visitData.data;
-            } else if (Array.isArray(visitData)) {
-              // Fallback if it's directly an array
-              visitArr = visitData;
-            }
-            
-            console.log("Parsed site visit array:", visitArr);
-            
-            // Convert API response to SiteVisitEntry format based on the actual API structure
-            const convertedVisits = visitArr.map((visit: Record<string, unknown>) => {
-              // Extract date and time from start_datetime and end_datetime
-              const startDateTime = String(visit.start_datetime || '');
-              const endDateTime = String(visit.end_datetime || '');
-              
-              // Parse date and time from datetime strings (format: "2025-08-12 00:12:00")
-              let visitDate = 'N/A';
-              let visitStartTime = 'N/A';
-              let visitEndTime = 'N/A';
-              
-              if (startDateTime && startDateTime !== '') {
-                const startParts = startDateTime.split(' ');
-                if (startParts.length >= 2) {
-                  visitDate = startParts[0]; // "2025-08-12"
-                  visitStartTime = startParts[1]; // "00:12:00"
-                }
-              }
-              
-              if (endDateTime && endDateTime !== '') {
-                const endParts = endDateTime.split(' ');
-                if (endParts.length >= 2) {
-                  visitEndTime = endParts[1]; // "00:13:00"
-                }
-              }
-              
-              // Determine visit status based on dates
-              const currentDate = new Date();
-              const visitDateObj = new Date(visitDate);
-              let visitStatus = 'Scheduled';
-              
-              if (visitDateObj < currentDate) {
-                visitStatus = 'Completed';
-              } else if (visitDate === currentDate.toISOString().split('T')[0]) {
-                visitStatus = 'In Progress';
-              }
-              
-              return {
-                visitPipelineID: parseInt(String(visit.call_id || visit.call_log_id || '0').replace('CL-', '')),
-                visitLogOrderID: parseInt(String(visit.site_visit_id || '0').replace('ST-', '')) || Math.floor(Math.random() * 1000),
-                visitDate: visitDate,
-                visitStartTime: visitStartTime,
-                visitEndTime: visitEndTime,
-                visitStatus: visitStatus,
-                visitType: String(visit.contact_result_name || visit.purpose || 'Site Visit'),
-                attendees: `${String(visit.staff_name || 'Unknown Staff')}, ${String(visit.lead_name || 'Unknown Lead')}`,
-                notes: String(visit.remark || 'N/A'),
-                createdAt: String(visit.created_date || 'N/A'),
-                lastUpdate: String(visit.last_update || ''),
-                // Store additional API data for reference
-                siteVisitId: String(visit.site_visit_id || ''),
-                propertyProfileName: String(visit.property_profile_name || ''),
-                contactResultName: String(visit.contact_result_name || ''),
-                photoUrls: Array.isArray(visit.photo_url) ? visit.photo_url : [],
-              };
-            }).sort((a: SiteVisitEntry, b: SiteVisitEntry) => b.visitLogOrderID - a.visitLogOrderID);
-            
-            setSiteVisitHistory(convertedVisits);
-          } else {
-            console.error("Failed to fetch site visit data");
-            setSiteVisitHistory([]);
-          }
-        } catch (visitError) {
-          console.error("Error loading site visit history:", visitError);
-          setSiteVisitHistory([]);
-        }
       }
     } catch (error) {
       console.error("Error loading pipeline information:", error);
@@ -242,128 +421,133 @@ export default function SiteVisitPage() {
     }
   }, [pipelineId]);
 
-  useEffect(() => {
-    loadPipelineInfo();
-  }, [loadPipelineInfo]);
+  // Load site visit history
+  const loadSiteVisitHistory = useCallback(async () => {
+    if (!pipelineId) {
+      setIsLoadingHistory(false);
+      return;
+    }
 
-  type SiteVisitFormErrors = {
-    visitDate?: string;
-    visitStartTime?: string;
-    visitEndTime?: string;
-    visitStatus?: string;
-    visitType?: string;
-    attendees?: string;
-    notes?: string;
-    uploadedDocuments?: string;
-  };
-
-  // Edit modal state
-  const [showEditVisitModal, setShowEditVisitModal] = useState(false);
-  const [editingVisitLog, setEditingVisitLog] = useState<SiteVisitEntry | null>(null);
-  const [editFormData, setEditFormData] = useState({
-    visitDate: "",
-    visitStartTime: "",
-    visitEndTime: "",
-    visitStatus: null as SelectOption | null,
-    visitType: null as SelectOption | null,
-    attendees: "",
-    notes: "",
-    uploadedDocuments: [] as File[],
-  });
-  const [editErrors, setEditErrors] = useState<SiteVisitFormErrors>({});
-
-  // View modal state - Legacy, kept for compatibility
-  const [showViewVisitModal, setShowViewVisitModal] = useState(false);
-  const [viewingVisitLog, setViewingVisitLog] = useState<SiteVisitEntry | null>(null);
-
-  // Visit status options
-  const statusOptions: SelectOption[] = [
-    { value: "Completed", label: "Completed" },
-    { value: "No Show", label: "No Show" },
-    { value: "Cancelled", label: "Cancelled" },
-    { value: "Postponed", label: "Postponed" },
-    { value: "In Progress", label: "In Progress" },
-    { value: "Scheduled", label: "Scheduled" },
-  ];
-
-  // Visit type options
-  const visitTypeOptions: SelectOption[] = [
-    { value: "Initial Tour", label: "Initial Tour" },
-    { value: "Follow-up Visit", label: "Follow-up Visit" },
-    { value: "Final Inspection", label: "Final Inspection" },
-    { value: "Property Viewing", label: "Property Viewing" },
-    { value: "Documentation", label: "Documentation" },
-    { value: "Other", label: "Other" },
-  ];
-
-  // Use site visit history from API instead of sample data
-  const pipelineVisitHistory = siteVisitHistory;
-
-  const handleEditFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
-    const files = event.target.files;
-    if (files) {
-      const fileArray = Array.from(files);
-      setEditFormData((prev) => ({ 
-        ...prev, 
-        uploadedDocuments: [...prev.uploadedDocuments, ...fileArray] 
-      }));
-      // Clear any previous upload errors
-      if (editErrors.uploadedDocuments) {
-        setEditErrors(prevErrors => {
-          const newErrors = { ...prevErrors };
-          delete newErrors.uploadedDocuments;
-          return newErrors;
-        });
+    // Load site visit history from API
+    console.log("� Loading site visit history for pipeline:", pipelineId);
+    console.log("Expected API call:", {
+      endpoint: "/site-visit/pagination",
+      method: "POST",
+      body: {
+        page_number: String(currentPage),
+        page_size: String(pageSize),
+        search_type: "call_log_id",
+        query_search: pipelineId,
       }
+    });
+
+    try {
+      setIsLoadingHistory(true);
+
+      const body = {
+        page_number: String(currentPage),
+        page_size: String(pageSize),
+        search_type: "call_log_id",
+        query_search: pipelineId,
+      };
+
+      const response = await fetch(`${getApiBase()}/site-visit/pagination`, {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify(body),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log("📝 Site Visit API Response:", data);
+        
+        let visitArr: SiteVisitEntry[] = [];
+        let totalCount = 0;
+        
+        // Handle the expected API response structure: [{ message, status_code, total_row, data }]
+        if (Array.isArray(data) && data.length > 0 && data[0].data) {
+          visitArr = data[0].data;
+          totalCount = data[0].total_row || visitArr.length;
+        } else if (Array.isArray(data?.data)) {
+          visitArr = data.data;
+          totalCount = data.total_row || visitArr.length;
+        } else if (Array.isArray(data)) {
+          visitArr = data;
+          totalCount = visitArr.length;
+        }
+
+        // Filter out empty photo URLs for each visit
+        visitArr = visitArr.map(visit => ({
+          ...visit,
+          photo_url: getValidPhotoUrls(visit.photo_url)
+        }));
+
+        console.log("📝 Processed Site Visits:", visitArr);
+        setSiteVisitHistory(visitArr);
+        setTotalItems(totalCount);
+
+        // Calculate statistics
+        if (visitArr.length > 0) {
+          setCurrentSiteVisitId(visitArr[0].site_visit_id);
+          
+          // Calculate total duration
+          let totalDurationMinutes = 0;
+          visitArr.forEach(visit => {
+            if (visit.start_datetime && visit.end_datetime) {
+              const start = new Date(visit.start_datetime);
+              const end = new Date(visit.end_datetime);
+              const duration = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+              if (duration > 0) totalDurationMinutes += duration;
+            }
+          });
+          setTotalDuration(totalDurationMinutes);
+
+          // Set last visit lead info
+          const lastVisit = visitArr[0];
+          console.log("🔍 Setting last visit lead - pipelineInfo:", pipelineInfo);
+          console.log("📱 callerPhone from pipelineInfo:", pipelineInfo?.callerPhone);
+          setLastVisitLead({
+            name: lastVisit.lead_name || 'N/A',
+            phone: pipelineInfo?.callerPhone || 'N/A'
+          });
+        } else {
+          setCurrentSiteVisitId('');
+          setTotalDuration(0);
+          setLastVisitLead({ name: '', phone: '' });
+        }
+      } else {
+        console.error("Failed to fetch site visit data");
+        setSiteVisitHistory([]);
+        setTotalItems(0);
+      }
+    } catch (error) {
+      console.error("Error loading site visit history:", error);
+      setSiteVisitHistory([]);
+      setTotalItems(0);
+    } finally {
+      setIsLoadingHistory(false);
+    }
+  }, [pipelineId, currentPage, pageSize, pipelineInfo]);
+
+  // Form handlers
+  const handleFormChange = (
+    field: keyof SiteVisitFormData,
+    value: string | SelectOption | null | boolean | Date
+  ) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (errors[field]) {
+      setErrors(prevErrors => {
+        const newErrors = { ...prevErrors };
+        delete newErrors[field];
+        return newErrors;
+      });
     }
   };
 
-  const handleRemoveEditDocument = (index: number) => {
-    setEditFormData((prev) => ({
-      ...prev,
-      uploadedDocuments: prev.uploadedDocuments.filter((_, i) => i !== index)
-    }));
-  };
-
-  // Form submission state for edit modal
-  const [isSubmitting, setIsSubmitting] = useState(false);
-
-  // Action handlers for site visit history table
-  const handleActionSelect = (action: 'view' | 'edit' | 'delete', visitLog: SiteVisitEntry) => {
-    switch (action) {
-      case 'view':
-        handleViewVisitLog(visitLog);
-        break;
-      case 'edit':
-        handleEditVisitLog(visitLog);
-        break;
-      case 'delete':
-        handleDeleteVisitLog(visitLog);
-        break;
-    }
-  };
-
-  const handleEditVisitLog = (log: SiteVisitEntry) => {
-    // Navigate to the edit page instead of opening a modal
-    router.push(`/callpipeline/sitevisit/edit?pipelineId=${pipelineId}&siteVisitId=${log.siteVisitId}`);
-  };
-
-  const handleViewVisitLog = (log: SiteVisitEntry) => {
-    // Navigate to the new view page instead of opening a modal
-    router.push(`/callpipeline/sitevisit/view?siteVisitId=${log.siteVisitId}&pipelineId=${pipelineId}`);
-  };
-
-  const handleDeleteVisitLog = (log: SiteVisitEntry) => {
-    // TODO: Implement delete functionality with confirmation
-    console.log("Delete site visit:", log);
-    const confirmed = confirm(`Are you sure you want to delete site visit #${log.visitLogOrderID}?\\n\\nThis action cannot be undone.`);
-    if (confirmed) {
-      alert(`Delete functionality for site visit #${log.visitLogOrderID} will be implemented soon.`);
-    }
-  };
-
-  // Edit modal handlers
-  const handleEditFormChange = (field: keyof typeof editFormData, value: string | SelectOption | null) => {
+  const handleEditFormChange = (
+    field: keyof SiteVisitFormData,
+    value: string | SelectOption | null | boolean | Date
+  ) => {
     setEditFormData((prev) => ({ ...prev, [field]: value }));
     if (editErrors[field]) {
       setEditErrors(prevErrors => {
@@ -374,105 +558,314 @@ export default function SiteVisitPage() {
     }
   };
 
-  const validateEditForm = () => {
-    const newErrors: SiteVisitFormErrors = {};
-    
-    if (!editFormData.visitDate) newErrors.visitDate = "Visit date is required.";
-    if (!editFormData.visitStartTime) newErrors.visitStartTime = "Start time is required.";
-    if (!editFormData.visitStatus) newErrors.visitStatus = "Visit status is required.";
-    if (!editFormData.visitType) newErrors.visitType = "Visit type is required.";
-    if (!editFormData.attendees.trim()) newErrors.attendees = "Attendees information is required.";
-    if (!editFormData.notes.trim()) newErrors.notes = "Notes are required.";
-    
-    // Validate end time is after start time if both are provided
-    if (editFormData.visitStartTime && editFormData.visitEndTime) {
-      const startTime = new Date(`2000-01-01T${editFormData.visitStartTime}`);
-      const endTime = new Date(`2000-01-01T${editFormData.visitEndTime}`);
-      if (endTime <= startTime) {
-        newErrors.visitEndTime = "End time must be after start time.";
-      }
-    }
-    
-    setEditErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
+  const resetForm = () => {
+    setFormData(DEFAULT_FORM_DATA);
+    setPhotos([]);
+    setErrors({});
   };
 
-  const handleEditSave = async () => {
-    if (!validateEditForm() || !editingVisitLog) return;
+  const resetEditForm = () => {
+    setEditFormData(DEFAULT_FORM_DATA);
+    setEditPhotos([]);
+    setEditErrors({});
+    setEditingVisit(null);
+  };
+
+  // Photo upload handler for multiple photos
+  const uploadMultiplePhotosToStorage = async (photoFiles: PhotoFile[], siteVisitId: string): Promise<string[]> => {
+    if (photoFiles.length === 0) {
+      return [];
+    }
+
+    const photoFormData = new FormData();
     
+    // Append all photo files
+    photoFiles.forEach((photo) => {
+      if (photo.file) {
+        photoFormData.append('photo', photo.file);
+      }
+    });
+    
+    // Append menu and photoId once
+    photoFormData.append('menu', 'site_visit');
+    photoFormData.append('photoId', String(siteVisitId));
+
+    try {
+      // For file uploads, we need headers without Content-Type (let browser set it for multipart/form-data)
+      const headers = getApiHeaders();
+      delete headers["Content-Type"];
+      
+      const uploadResponse = await fetch(`${getApiBase()}/files/upload-multiple-photos`, {
+        method: 'POST',
+        headers,
+        body: photoFormData,
+      });
+      
+      if (!uploadResponse.ok) {
+        const errorData = await uploadResponse.json().catch(() => ({}));
+        throw new Error(errorData.message || `Photo upload failed with status ${uploadResponse.status}`);
+      }
+      
+      const uploadData = await uploadResponse.json();
+      console.log('Multiple photos upload response:', uploadData);
+      
+      // Extract the imageUrls array from the response
+      const imageUrls = uploadData.imageUrls;
+      if (!imageUrls || !Array.isArray(imageUrls)) {
+        throw new Error('No imageUrls array returned from upload response');
+      }
+      
+      console.log('Extracted imageUrls:', imageUrls);
+      return imageUrls;
+    } catch (error) {
+      console.error('Error uploading multiple photos:', error);
+      throw error;
+    }
+  };
+
+  // Create site visit
+  const handleCreateSubmit = async () => {
+    const formErrors = validateFormData(formData);
+    if (Object.keys(formErrors).length > 0) {
+      setErrors(formErrors);
+      return;
+    }
+
+    if (!pipelineInfo) return;
+
     try {
       setIsSubmitting(true);
       
-      const updatedVisitData = {
-        visitPipelineID: editingVisitLog.visitPipelineID,
-        visitLogOrderID: editingVisitLog.visitLogOrderID,
-        visitDate: editFormData.visitDate,
-        visitStartTime: editFormData.visitStartTime,
-        visitEndTime: editFormData.visitEndTime || "",
-        visitStatus: editFormData.visitStatus?.value,
-        visitType: editFormData.visitType?.value,
-        attendees: editFormData.attendees,
-        notes: editFormData.notes,
-        createdAt: editingVisitLog.createdAt, // Keep original created date
+      // Upload photos first if any
+      const photoUrls: string[] = [];
+      if (photos.length > 0) {
+        try {
+          const tempSiteVisitId = `SV-${Date.now()}`;
+          console.log("Uploading new photos:", photos.length);
+          // Upload all photos at once using the multiple photos endpoint
+          const uploadedUrls = await uploadMultiplePhotosToStorage(photos, tempSiteVisitId);
+          photoUrls.push(...uploadedUrls);
+          console.log("Successfully uploaded photos, URLs:", uploadedUrls);
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
+          alert(`Error uploading photos: ${errorMessage}`);
+          return;
+        }
+      }
+
+      const startDatetime = `${formData.visitDate.toISOString().split('T')[0]} ${formData.visitStartTime}:00`;
+      const endDatetime = formData.visitEndTime
+        ? `${formData.visitDate.toISOString().split('T')[0]} ${formData.visitEndTime}:00`
+        : "";
+
+      const apiRequestBody = {
+        call_id: pipelineInfo.pipelineId,
+        property_profile_id: String(pipelineInfo.propertyProfileId),
+        staff_id: String(pipelineInfo.callerId || "000001"),
+        lead_id: pipelineInfo.leadId,
+        contact_result_id: formData.contactResult?.value || "1",
+        purpose: formData.purpose || "Site visit scheduled.",
+        start_datetime: startDatetime,
+        end_datetime: endDatetime,
+        photo_url: photoUrls,
+        remark: formData.notes
       };
-      
-      console.log("Updated Site Visit Data to submit:", updatedVisitData);
-      
-      // TODO: Replace with actual API call when backend is ready
-      // await api.put(`/site-visit-history/${editingVisitLog.visitLogOrderID}`, updatedVisitData);
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Close the edit modal and reset form
-      setShowEditVisitModal(false);
-      resetEditForm();
-      
-      // Show success alert (could be replaced with a proper success modal)
-      alert("Site visit updated successfully!");
-      
-      // Refresh the data to reflect changes
-      loadPipelineInfo();
-      
+
+      // TODO: Site visit create API endpoint may not be fully implemented
+      console.log("� Creating site visit via API:", {
+        endpoint: "/site-visit/create",
+        method: "POST",
+        payload: apiRequestBody
+      });
+
+      const response = await fetch(`${getApiBase()}/site-visit/create`, {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify(apiRequestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `API request failed with status ${response.status}`);
+      }
+
+      setShowQuickModal(false);
+      resetForm();
+      setShowSuccessModal(true);
+      loadSiteVisitHistory();
     } catch (error) {
-      console.error("Error updating site visit:", error);
-      alert("Failed to update site visit. Please try again.");
+      alert(`Failed to save site visit: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const resetEditForm = () => {
+  // Update site visit 
+  const handleEditSubmit = async () => {
+    const formErrors = validateFormData(editFormData);
+    if (Object.keys(formErrors).length > 0) {
+      setEditErrors(formErrors);
+      return;
+    }
+
+    if (!editingVisit) return;
+
+    try {
+      setIsEditingSubmitting(true);
+      
+      // Process photos - upload all new photos and preserve existing ones
+      const existingPhotos = editingVisit.photo_url || [];
+      const newPhotoFiles = editPhotos.filter(photo => photo.file);
+      
+      console.log('Existing photos:', existingPhotos);
+      console.log('New photo files to upload:', newPhotoFiles.length);
+      
+      const photoUrls = [...existingPhotos];
+      
+      // Upload new photos if any
+      if (newPhotoFiles.length > 0) {
+        console.log("Uploading new photos:", newPhotoFiles.length);
+        try {
+          // Upload all new photos at once using the multiple photos endpoint
+          const uploadedUrls = await uploadMultiplePhotosToStorage(newPhotoFiles, editingVisit.site_visit_id);
+          photoUrls.push(...uploadedUrls);
+          console.log("Successfully uploaded photos, URLs:", uploadedUrls);
+          console.log('Final photo URLs array:', photoUrls);
+        } catch (uploadError) {
+          console.error("Error uploading photos:", uploadError);
+          alert("Error uploading photos. Please try again.");
+          setIsEditingSubmitting(false);
+          return;
+        }
+      }
+
+      const startDatetime = `${editFormData.visitDate.toISOString().split('T')[0]} ${editFormData.visitStartTime}:00`;
+      const endDatetime = editFormData.visitEndTime
+        ? `${editFormData.visitDate.toISOString().split('T')[0]} ${editFormData.visitEndTime}:00`
+        : "";
+
+      const apiRequestBody = {
+        site_visit_id: editingVisit.site_visit_id,
+        call_id: editingVisit.call_id,
+        property_profile_id: String(editingVisit.property_profile_id),
+        staff_id: String(editingVisit.staff_id),
+        lead_id: editingVisit.lead_id,
+        contact_result_id: editFormData.contactResult?.value || "1",
+        purpose: editFormData.purpose || "Site visit updated.",
+        start_datetime: startDatetime,
+        end_datetime: endDatetime,
+        photo_url: photoUrls, // Use the combined photo URLs (existing + new uploads)
+        remark: editFormData.notes,
+        is_active: editingVisit.is_active
+      };
+
+      // TODO: Site visit update API endpoint may not be fully implemented
+      console.log("� Updating site visit via API:", {
+        endpoint: "/site-visit/update",
+        method: "PUT",
+        payload: apiRequestBody
+      });
+
+      const response = await fetch(`${getApiBase()}/site-visit/update`, {
+        method: "PUT",
+        headers: getApiHeaders(),
+        body: JSON.stringify(apiRequestBody),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `API request failed with status ${response.status}`);
+      }
+
+      setShowEditModal(false);
+      resetEditForm();
+      setShowSuccessModal(true);
+      loadSiteVisitHistory();
+    } catch (error) {
+      alert(`Failed to update site visit: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    } finally {
+      setIsEditingSubmitting(false);
+    }
+  };
+
+  // Action handlers
+  const handleViewVisit = (visit: SiteVisitEntry) => {
+    // Navigate to the dedicated view page instead of opening a modal
+    router.push(`/callpipeline/sitevisit/view?pipelineId=${pipelineId}&siteVisitId=${visit.site_visit_id}`);
+  };
+
+  const handleEditVisit = (visit: SiteVisitEntry) => {
+    setEditingVisit(visit);
+    
+    // Parse visit date and times from start_datetime
+    const startDate = new Date(visit.start_datetime);
+    const endDate = visit.end_datetime ? new Date(visit.end_datetime) : null;
+    
+    const visitDate = startDate;
+    const startTime = startDate.toTimeString().slice(0, 5); // HH:MM
+    const endTime = endDate ? endDate.toTimeString().slice(0, 5) : '';
+
+    // Find matching status option
+    const statusOption = statusOptions.find(opt => opt.value === String(visit.contact_result_id));
+
     setEditFormData({
-      visitDate: "",
-      visitStartTime: "",
-      visitEndTime: "",
-      visitStatus: null,
-      visitType: null,
-      attendees: "",
-      notes: "",
-      uploadedDocuments: [],
+      visitDate: visitDate,
+      visitStartTime: startTime,
+      visitEndTime: endTime,
+      contactResult: statusOption || null,
+      purpose: visit.purpose,
+      notes: visit.remark,
+      isFollowUp: false,
+      followUpDate: null,
     });
-    setEditErrors({});
-    setEditingVisitLog(null);
+    
+    setShowEditModal(true);
   };
 
-  const handleCancelEdit = () => {
-    setShowEditVisitModal(false);
-    resetEditForm();
+  const handleDeleteVisit = async (visit: SiteVisitEntry) => {
+    const confirmed = confirm(`Are you sure you want to delete site visit ${visit.site_visit_id}?\n\nThis action cannot be undone.`);
+    if (!confirmed) return;
+
+    try {
+      // TODO: Implement delete API call when available
+      alert(`Delete functionality for site visit ${visit.site_visit_id} will be implemented soon.`);
+    } catch (error) {
+      alert(`Failed to delete site visit: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
   };
 
-  // Pagination state for site visit history
-  const [currentPage, setCurrentPage] = useState(1);
-  const itemsPerPage = 5;
+  // Effect hooks
+  useEffect(() => {
+    loadStatusOptions();
+  }, [loadStatusOptions]);
 
-  // Calculate pagination for site visit history
-  const totalPages = Math.ceil(pipelineVisitHistory.length / itemsPerPage);
-  const startIndex = (currentPage - 1) * itemsPerPage;
-  const endIndex = startIndex + itemsPerPage;
-  const currentVisitHistory = pipelineVisitHistory.slice(startIndex, endIndex);
+  useEffect(() => {
+    loadPipelineInfo();
+  }, [loadPipelineInfo]);
 
-  // Pagination component - using the same design as CallLogsTable
+  useEffect(() => {
+    if (statusOptions.length > 0 && pipelineInfo) {
+      loadSiteVisitHistory();
+    }
+  }, [loadSiteVisitHistory, statusOptions, pipelineInfo]);
+
+  // Update lastVisitLead phone when pipelineInfo changes
+  useEffect(() => {
+    if (pipelineInfo?.callerPhone && lastVisitLead.name && lastVisitLead.name !== 'N/A') {
+      setLastVisitLead(prev => ({
+        ...prev,
+        phone: pipelineInfo.callerPhone
+      }));
+    }
+  }, [pipelineInfo?.callerPhone, lastVisitLead.name]);
+
+  // Calculate pagination
+  const totalPages = Math.ceil(totalItems / pageSize);
+  const startIndex = (currentPage - 1) * pageSize;
+  const endIndex = Math.min(startIndex + pageSize, siteVisitHistory.length);
+  const currentHistory = siteVisitHistory;
+
+  // Pagination component
   const Pagination = ({ currentPage, totalPages, onPageChange }: { currentPage: number, totalPages: number, onPageChange: (page: number) => void }) => {
     const getPageNumbers = () => {
       const pages = [];
@@ -531,28 +924,16 @@ export default function SiteVisitPage() {
     );
   };
 
-  // Format time for display
-  const formatTime = (time: string) => {
-    if (!time) return "N/A";
-    return time;
-  };
-
-  // Show loading or no data if pipeline info is not loaded
+  // Loading or error states
   if (isLoadingPipeline) {
     return (
       <div>
         <PageBreadcrumb crumbs={breadcrumbs} />
-        <div className="flex items-center justify-center py-12">
-          <div className="text-center">
-            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500 mx-auto mb-4"></div>
-            <p className="text-gray-500 dark:text-gray-400">Loading pipeline information...</p>
-          </div>
-        </div>
+        <LoadingOverlay isLoading={true} />
       </div>
     );
   }
 
-  // Redirect to pipeline list if no pipelineId
   if (!pipelineId) {
     router.push("/callpipeline");
     return null;
@@ -578,508 +959,771 @@ export default function SiteVisitPage() {
     <div>
       <PageBreadcrumb crumbs={breadcrumbs} />
       <div className="space-y-6">
-        {/* Section 1: General Information (Read-only) */}
-        <ComponentCard title="Pipeline Information">
-          <div className="mb-6 flex items-center justify-between">
-            <h4 className="text-lg font-semibold text-gray-800 dark:text-white/90">
-              General Information
-            </h4>
-            <div className="flex items-center space-x-3">
+        {/* Quick Site Visit Management */}
+        <ComponentCard title="Quick Site Visit Management">
+          <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary bg-opacity-10">
+                  <svg className="h-5 w-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
+                  </svg>
+                </div>
+                <div>
+                  <h3 className="text-sm font-semibold text-black dark:text-white">
+                    Site Visit Entry
+                  </h3>
+                  <p className="text-xs text-body dark:text-bodydark">
+                    Schedule or log a site visit for this pipeline
+                  </p>
+                </div>
+              </div>
               <Button
                 type="button"
-                variant="outline"
+                variant="primary"
                 size="sm"
-                onClick={() => router.back()}
+                onClick={() => setShowQuickModal(true)}
                 className="flex items-center gap-2"
               >
                 <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 19l-7-7m0 0l7-7m-7 7h18" />
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                 </svg>
-                Back
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => router.push(`/callpipeline/edit?id=${pipelineInfo.pipelineId}`)}
-                className="flex items-center gap-2"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
-                </svg>
-                Edit
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => {
-                  if (confirm('Are you sure you want to delete this call pipeline? This action cannot be undone.')) {
-                    // TODO: Implement delete functionality
-                    console.log('Delete pipeline:', pipelineInfo.pipelineId);
-                    // router.push('/callpipeline');
-                  }
-                }}
-                className="flex items-center gap-2 border-red-300 text-red-600 hover:bg-red-50 dark:border-red-600 dark:text-red-400 dark:hover:bg-red-900/10"
-              >
-                <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                </svg>
-                Delete
+                Add Site Visit
               </Button>
             </div>
           </div>
+        </ComponentCard>
 
-          {/* Modern Compact Card Layout - 4 cards in one row */}
+        {/* Quick Site Visit Modal */}
+        <Modal 
+          isOpen={showQuickModal} 
+          onClose={() => {
+            setShowQuickModal(false);
+            resetForm();
+          }}
+          className="max-w-4xl p-6"
+        >
+          <div className="mb-6">
+            <h4 className="text-lg font-medium text-gray-900 dark:text-white">
+              📍 Quick Site Visit
+            </h4>
+            <p className="mb-6 text-sm text-gray-500 dark:text-gray-400 lg:mb-7">
+              {pipelineInfo ? `Schedule a site visit for Pipeline #${pipelineInfo.pipelineId}` : 'Schedule a new site visit'}
+            </p>
+          </div>
+          
+          {isLoadingPipeline ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="text-center">
+                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500 mx-auto mb-4"></div>
+                <p className="text-gray-500 dark:text-gray-400">Loading pipeline information...</p>
+              </div>
+            </div>
+          ) : pipelineInfo ? (
+            <>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-6">
+                <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-3 dark:border-gray-700 dark:from-blue-900/20 dark:to-indigo-900/20">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Pipeline</h3>
+                    <p className="text-sm font-bold text-blue-800 dark:text-blue-200">#{pipelineInfo.pipelineId}</p>
+                  </div>
+                </div>
+                <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-green-50 to-emerald-50 p-3 dark:border-gray-700 dark:from-green-900/20 dark:to-emerald-900/20">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Lead</h3>
+                    <p className="text-sm font-bold text-green-800 dark:text-green-200">{pipelineInfo.leadName}</p>
+                  </div>
+                </div>
+                <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-purple-50 to-pink-50 p-3 dark:border-gray-700 dark:from-purple-900/20 dark:to-pink-900/20">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Property</h3>
+                    <p className="text-sm font-bold text-purple-800 dark:text-purple-200">{pipelineInfo.propertyName}</p>
+                  </div>
+                </div>
+              </div>
+              
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 gap-x-6 gap-y-5 lg:grid-cols-4">
+                  <div>
+                    <DatePicker
+                      id="quick-site-visit-date-picker"
+                      label="Visit Date *"
+                      placeholder="Select visit date"
+                      defaultDate={formData.visitDate}
+                      onChange={(selectedDates) => {
+                        if (selectedDates && selectedDates.length > 0) {
+                          handleFormChange('visitDate', selectedDates[0]);
+                        }
+                      }}
+                    />
+                    {errors.visitDate && <p className="text-sm text-red-500 mt-1">{errors.visitDate}</p>}
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="quickSiteVisitStartTime">Start Time *</Label>
+                    <div className="relative">
+                      <InputField
+                        type="time"
+                        id="quickSiteVisitStartTime"
+                        value={formData.visitStartTime}
+                        onChange={(e) => handleFormChange('visitStartTime', e.target.value)}
+                        error={!!errors.visitStartTime}
+                      />
+                      <span className="absolute text-gray-500 -translate-y-1/2 pointer-events-none right-3 top-1/2 dark:text-gray-400">
+                        <TimeIcon />
+                      </span>
+                    </div>
+                    {errors.visitStartTime && <p className="text-sm text-red-500 mt-1">{errors.visitStartTime}</p>}
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="quickSiteVisitEndTime">End Time</Label>
+                    <div className="relative">
+                      <InputField
+                        type="time"
+                        id="quickSiteVisitEndTime"
+                        value={formData.visitEndTime}
+                        onChange={(e) => handleFormChange('visitEndTime', e.target.value)}
+                        error={!!errors.visitEndTime}
+                      />
+                      <span className="absolute text-gray-500 -translate-y-1/2 pointer-events-none right-3 top-1/2 dark:text-gray-400">
+                        <TimeIcon />
+                      </span>
+                    </div>
+                    {errors.visitEndTime && <p className="text-sm text-red-500 mt-1">{errors.visitEndTime}</p>}
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="quickSiteVisitContactResult">Contact Result *</Label>
+                    <Select
+                      placeholder={isLoadingStatus ? "Loading..." : "Select status"}
+                      options={statusOptions}
+                      value={formData.contactResult}
+                      onChange={(option) => handleFormChange('contactResult', option)}
+                    />
+                    {errors.contactResult && <p className="text-sm text-red-500 mt-1">{errors.contactResult}</p>}
+                  </div>
+                </div>
+
+                <div>
+                  <Label htmlFor="quickSiteVisitPurpose">Purpose</Label>
+                  <InputField
+                    id="quickSiteVisitPurpose"
+                    value={formData.purpose}
+                    onChange={(e) => handleFormChange('purpose', e.target.value)}
+                    placeholder="Enter visit purpose"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="quickSiteVisitFollowUpToggle">Follow-up Required</Label>
+                  <div className="flex items-center">
+                    <label className="inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        id="quickSiteVisitFollowUpToggle"
+                        checked={formData.isFollowUp}
+                        onChange={(e) => handleFormChange('isFollowUp', e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
+                        formData.isFollowUp ? 'bg-brand-500' : 'bg-gray-200 dark:bg-gray-700'
+                      }`}>
+                        <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${
+                          formData.isFollowUp ? 'transform translate-x-5' : ''
+                        }`}></div>
+                      </div>
+                    </label>
+                  </div>
+                  {errors.isFollowUp && <p className="text-sm text-red-500 mt-1">{errors.isFollowUp}</p>}
+                </div>
+                
+                {formData.isFollowUp && (
+                  <div>
+                    <DatePicker
+                      id="quick-site-visit-follow-up-date-picker"
+                      label="Follow-up Date *"
+                      placeholder="Select follow-up date"
+                      defaultDate={formData.followUpDate || undefined}
+                      onChange={(selectedDates) => {
+                        if (selectedDates && selectedDates.length > 0) {
+                          handleFormChange('followUpDate', selectedDates[0]);
+                        }
+                      }}
+                    />
+                    {errors.followUpDate && <p className="text-sm text-red-500 mt-1">{errors.followUpDate}</p>}
+                  </div>
+                )}
+                
+                <div>
+                  <Label htmlFor="quickSiteVisitNotes">Notes/Remarks *</Label>
+                  <TextArea
+                    value={formData.notes}
+                    onChange={(value) => handleFormChange('notes', value)}
+                    placeholder="Enter notes or remarks about the site visit"
+                    rows={4}
+                    error={!!errors.notes}
+                  />
+                  {errors.notes && <p className="text-sm text-red-500 mt-1">{errors.notes}</p>}
+                </div>
+                
+                <div>
+                  <Label>Photos</Label>
+                  <PhotoUpload photos={photos} onPhotosChange={setPhotos} />
+                  <p className="text-xs text-gray-500 mt-1">Upload up to 10 photos (5MB each)</p>
+                </div>
+                
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setShowQuickModal(false);
+                      resetForm();
+                    }}
+                    disabled={isSubmitting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={handleCreateSubmit}
+                    disabled={isSubmitting}
+                  >
+                    {isSubmitting ? "Saving..." : "Save Site Visit"}
+                  </Button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div className="text-center py-8">
+              <p className="text-gray-500 dark:text-gray-400">Failed to load pipeline information.</p>
+            </div>
+          )}
+        </Modal>
+
+        {/* Site Visit Statistics */}
+        <ComponentCard title="Site Visit Statistics">
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            
-            {/* Pipeline Overview Card */}
+            {/* Current Site Visit ID */}
             <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-4 dark:border-gray-700 dark:from-blue-900/20 dark:to-indigo-900/20">
               <div className="absolute top-3 right-3">
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
                   <svg className="h-3 w-3 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
                   </svg>
                 </div>
               </div>
               <div className="space-y-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Pipeline Overview</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-300">Core identification</p>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Current Site Visit ID</h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-300">Latest entry</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-bold text-blue-800 dark:text-blue-200 leading-tight" title={`Pipeline #${pipelineInfo.pipelineId}`}>
-                    Pipeline #{pipelineInfo.pipelineId}
+                  <p className="text-lg font-bold text-blue-800 dark:text-blue-200 leading-tight">
+                    {currentSiteVisitId || 'N/A'}
                   </p>
-                  <div className="mt-2 flex justify-center">
-                    <span className="rounded-full bg-blue-100 px-2 py-0.5 text-xs font-mono font-medium text-blue-700 dark:bg-blue-900/30 dark:text-blue-300">
-                      Status: 1
-                    </span>
-                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Lead Information Card */}
+            {/* Total Number of Site Visits */}
             <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-green-50 to-emerald-50 p-4 dark:border-gray-700 dark:from-green-900/20 dark:to-emerald-900/20">
               <div className="absolute top-3 right-3">
                 <div className="flex h-6 w-6 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
                   <svg className="h-3 w-3 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Total Site Visits</h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-300">Visit count</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-green-800 dark:text-green-200 leading-tight">
+                    {totalItems}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Sum of Duration */}
+            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-orange-50 to-red-50 p-4 dark:border-gray-700 dark:from-orange-900/20 dark:to-red-900/20">
+              <div className="absolute top-3 right-3">
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/30">
+                  <svg className="h-3 w-3 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <div>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Total Duration</h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-300">Time spent</p>
+                </div>
+                <div className="text-center">
+                  <p className="text-lg font-bold text-orange-800 dark:text-orange-200 leading-tight">
+                    {formatDuration(totalDuration)}
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            {/* Lead Name & Phone */}
+            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-purple-50 to-pink-50 p-4 dark:border-gray-700 dark:from-purple-900/20 dark:to-pink-900/20">
+              <div className="absolute top-3 right-3">
+                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/30">
+                  <svg className="h-3 w-3 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                 </div>
               </div>
               <div className="space-y-3">
                 <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Lead Information</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-300">Primary contact</p>
+                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Latest Visit Lead</h3>
+                  <p className="text-xs text-gray-600 dark:text-gray-300">Contact info</p>
                 </div>
                 <div className="text-center">
-                  <p className="text-lg font-bold text-green-800 dark:text-green-200 leading-tight" title={pipelineInfo.leadName}>
-                    {pipelineInfo.leadName}
+                  <p className="text-lg font-bold text-purple-800 dark:text-purple-200 leading-tight">
+                    {lastVisitLead.name || 'N/A'}
                   </p>
-                  <div className="mt-2 flex justify-center">
-                    <span className="rounded-full bg-green-100 px-2 py-0.5 text-xs font-mono font-medium text-green-700 dark:bg-green-900/30 dark:text-green-300">
-                      ID: {pipelineInfo.leadId || 'N/A'}
+                  <div className="mt-1">
+                    <span className="text-xs text-purple-600 dark:text-purple-300">
+                      {formatPhoneNumber(lastVisitLead.phone) || 'N/A'}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
-
-            {/* Property Information Card */}
-            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-purple-50 to-pink-50 p-4 dark:border-gray-700 dark:from-purple-900/20 dark:to-pink-900/20">
-              <div className="absolute top-3 right-3">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/30">
-                  <svg className="h-3 w-3 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                  </svg>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Property Information</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-300">Property profile</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-purple-800 dark:text-purple-200 leading-tight" title={pipelineInfo.propertyName}>
-                    {pipelineInfo.propertyName}
-                  </p>
-                  <div className="mt-2 flex justify-center">
-                    <span className="rounded-full bg-purple-100 px-2 py-0.5 text-xs font-mono font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">
-                      ID: {pipelineInfo.propertyProfileId || 'N/A'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Caller Information Card */}
-            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-orange-50 to-red-50 p-4 dark:border-gray-700 dark:from-orange-900/20 dark:to-red-900/20">
-              <div className="absolute top-3 right-3">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/30">
-                  <svg className="h-3 w-3 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M3 5a2 2 0 012-2h3.28a1 1 0 01.948.684l1.498 4.493a1 1 0 01-.502 1.21l-2.257 1.13a11.042 11.042 0 005.516 5.516l1.13-2.257a1 1 0 011.21-.502l4.493 1.498a1 1 0 01.684.949V19a2 2 0 01-2 2h-1C9.716 21 3 14.284 3 6V5z" />
-                  </svg>
-                </div>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Caller Information</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-300">Staff member</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-orange-800 dark:text-orange-200 leading-tight" title={pipelineInfo.callerName}>
-                    {pipelineInfo.callerName}
-                  </p>
-                  <div className="mt-2 flex justify-center">
-                    <span className="rounded-full bg-orange-100 px-2 py-0.5 text-xs font-mono font-medium text-orange-700 dark:bg-orange-900/30 dark:text-orange-300">
-                      ID: {pipelineInfo.callerId || 'N/A'}
-                    </span>
-                  </div>
-                </div>
-              </div>
-            </div>
-
           </div>
         </ComponentCard>
 
-        {/* View Site Visit Modal */}
-        <Modal
-          isOpen={showViewVisitModal}
-          onClose={() => setShowViewVisitModal(false)}
-          className="max-w-2xl p-4 lg:p-8"
-        >
-          <div className="px-2 lg:pr-10">
-            <h4 className="mb-2 text-2xl font-semibold text-gray-800 dark:text-white/90">
-              Site Visit Entry Details
-            </h4>
-            <p className="mb-6 text-sm text-gray-500 dark:text-gray-400 lg:mb-7">
-              Viewing details for Site Visit #{viewingVisitLog?.visitLogOrderID || 'Unknown'}
-            </p>
-          </div>
-          <div className="mb-6 rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark">
-            <div className="flex items-center justify-between border-b border-stroke pb-3 dark:border-strokedark">
+        {/* Site Visit History Table */}
+        <ComponentCard title="Site Visit History">
+          <div className="space-y-4">
+            {/* Table Header with Title */}
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h3 className="text-base font-semibold text-black dark:text-white">
-                  Site Visit Information
-                </h3>
-                <p className="mt-1 text-sm text-body dark:text-bodydark">
-                  Site Visit #{viewingVisitLog?.visitLogOrderID || 'Unknown'}
+                <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
+                  All Site Visit Details
+                </h2>
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Total {totalItems} site visit {totalItems === 1 ? 'entry' : 'entries'} found
                 </p>
               </div>
-              <div className="flex items-center space-x-3">
-                <span className={`inline-flex items-center px-2 py-0.5 rounded text-xs font-medium ${
-                  viewingVisitLog?.visitStatus === 'Completed'
-                    ? 'bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300'
-                    : viewingVisitLog?.visitStatus === 'In Progress' || viewingVisitLog?.visitStatus === 'Scheduled'
-                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-300'
-                    : 'bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-300'
-                }`}>
-                  {viewingVisitLog?.visitStatus || 'Unknown'}
-                </span>
-              </div>
             </div>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-md bg-gray-1 p-3 dark:bg-meta-4">
-                <dt className="text-xs font-medium text-body dark:text-bodydark">Visit Log ID</dt>
-                <dd className="mt-1 font-mono text-sm font-semibold text-black dark:text-white">
-                  #{viewingVisitLog?.visitLogOrderID || 'N/A'}
-                </dd>
+
+            {isLoadingHistory ? (
+              <div className="flex items-center justify-center py-12">
+                <div className="text-center">
+                  <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500 mx-auto mb-4"></div>
+                  <p className="text-gray-500 dark:text-gray-400">Loading site visit history...</p>
+                </div>
               </div>
-              <div className="rounded-md bg-gray-1 p-3 dark:bg-meta-4">
-                <dt className="text-xs font-medium text-body dark:text-bodydark">Created Date</dt>
-                <dd className="mt-1 text-sm font-semibold text-black dark:text-white">
-                  {viewingVisitLog?.createdAt || 'Not available'}
-                </dd>
+            ) : siteVisitHistory.length === 0 ? (
+              <div className="py-8 text-center bg-white dark:bg-white/[0.03] rounded-xl border border-gray-200 dark:border-white/[0.05]">
+                <p className="text-gray-500 dark:text-gray-400">
+                  No site visit history found for this pipeline. Add the first site visit entry above.
+                </p>
               </div>
-            </div>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-md bg-gray-1 p-3 dark:bg-meta-4">
-                <dt className="text-xs font-medium text-body dark:text-bodydark">Visit Date</dt>
-                <dd className="mt-1 text-sm font-semibold text-black dark:text-white">
-                  {viewingVisitLog?.visitDate || 'N/A'}
-                </dd>
-              </div>
-              <div className="rounded-md bg-gray-1 p-3 dark:bg-meta-4">
-                <dt className="text-xs font-medium text-body dark:text-bodydark">Start Time</dt>
-                <dd className="mt-1 text-sm font-semibold text-black dark:text-white">
-                  {viewingVisitLog?.visitStartTime || 'N/A'}
-                </dd>
-              </div>
-              <div className="rounded-md bg-gray-1 p-3 dark:bg-meta-4">
-                <dt className="text-xs font-medium text-body dark:text-bodydark">End Time</dt>
-                <dd className="mt-1 text-sm font-semibold text-black dark:text-white">
-                  {viewingVisitLog?.visitEndTime || 'N/A'}
-                </dd>
-              </div>
-              <div className="rounded-md bg-gray-1 p-3 dark:bg-meta-4">
-                <dt className="text-xs font-medium text-body dark:text-bodydark">Visit Type</dt>
-                <dd className="mt-1 text-sm font-semibold text-black dark:text-white">
-                  {viewingVisitLog?.visitType || 'N/A'}
-                </dd>
-              </div>
-            </div>
-            <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
-              <div className="rounded-md bg-gray-1 p-3 dark:bg-meta-4">
-                <dt className="text-xs font-medium text-body dark:text-bodydark">Attendees</dt>
-                <dd className="mt-1 text-sm font-semibold text-black dark:text-white">
-                  {viewingVisitLog?.attendees || 'N/A'}
-                </dd>
-              </div>
-              <div className="rounded-md bg-gray-1 p-3 dark:bg-meta-4">
-                <dt className="text-xs font-medium text-body dark:text-bodydark">Notes</dt>
-                <dd className="mt-1 text-sm font-semibold text-black dark:text-white">
-                  {viewingVisitLog?.notes || 'N/A'}
-                </dd>
-              </div>
-            </div>
+            ) : (
+              <>
+                {/* Table */}
+                <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-white/[0.05] dark:bg-white/[0.03]">
+                  <div className="max-w-full overflow-x-auto">
+                    <div className="min-w-[1000px]">
+                      <Table>
+                        <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
+                          <TableRow>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-center text-theme-xs dark:text-gray-400">
+                              Visit ID
+                            </TableCell>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                              Visit Date
+                            </TableCell>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                              Time
+                            </TableCell>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                              Duration
+                            </TableCell>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                              Lead Name
+                            </TableCell>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                              Contact Result
+                            </TableCell>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                              Photos
+                            </TableCell>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                              Lead Phone
+                            </TableCell>
+                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                              Actions
+                            </TableCell>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
+                          {currentHistory.map((visit: SiteVisitEntry) => {
+                            // Calculate duration if both start and end times exist
+                            let duration = 'N/A';
+                            if (visit.start_datetime && visit.end_datetime) {
+                              try {
+                                const start = new Date(visit.start_datetime);
+                                const end = new Date(visit.end_datetime);
+                                const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
+                                if (diffMinutes > 0) {
+                                  duration = formatDuration(diffMinutes);
+                                }
+                              } catch {
+                                duration = 'N/A';
+                              }
+                            }
+
+                            return (
+                              <TableRow key={visit.site_visit_id}>
+                                {/* Visit ID */}
+                                <TableCell className="px-5 py-4 text-center">
+                                  <span className="font-mono text-sm text-gray-600 dark:text-gray-300">
+                                    {visit.site_visit_id}
+                                  </span>
+                                </TableCell>
+                                
+                                {/* Visit Date */}
+                                <TableCell className="px-5 py-4">
+                                  <div className="font-medium text-gray-800 dark:text-white text-sm">
+                                    {formatDate(visit.start_datetime)}
+                                  </div>
+                                </TableCell>
+                                
+                                {/* Time */}
+                                <TableCell className="px-5 py-4">
+                                  <div className="flex flex-col">
+                                    <span className="font-medium text-sm text-gray-500 dark:text-gray-400">
+                                      {formatTime(visit.start_datetime)} - {formatTime(visit.end_datetime)}
+                                    </span>
+                                  </div>
+                                </TableCell>
+                                
+                                {/* Duration */}
+                                <TableCell className="px-5 py-4">
+                                  <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-300">
+                                    {duration}
+                                  </span>
+                                </TableCell>
+                                
+                                {/* Lead Name */}
+                                <TableCell className="px-5 py-4 text-gray-800 text-sm dark:text-gray-300 font-medium">
+                                  {visit.lead_name}
+                                </TableCell>
+                                
+                                {/* Contact Result */}
+                                <TableCell className="px-5 py-4">
+                                  <span className={`inline-flex items-center px-2 py-1 rounded-full text-xs font-medium ${getContactResultStyle(visit.contact_result_name)}`}>
+                                    {visit.contact_result_name}
+                                  </span>
+                                </TableCell>
+                                
+                                {/* Photos */}
+                                <TableCell className="px-5 py-4">
+                                  <div className="flex items-center text-sm text-gray-600 dark:text-gray-300">
+                                    <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                    </svg>
+                                    {getValidPhotoCount(visit.photo_url)}
+                                  </div>
+                                </TableCell>
+                                
+                                {/* Lead Phone */}
+                                <TableCell className="px-5 py-4 text-gray-800 text-sm dark:text-gray-300 font-medium">
+                                  {formatPhoneNumber(pipelineInfo?.callerPhone || 'N/A')}
+                                </TableCell>
+                                
+                                {/* Actions */}
+                                <TableCell className="px-4 py-3 text-start">
+                                  <ActionMenu visitLog={visit} onSelect={(action, visitLog) => {
+                                    switch (action) {
+                                      case 'view':
+                                        handleViewVisit(visitLog);
+                                        break;
+                                      case 'edit':
+                                        handleEditVisit(visitLog);
+                                        break;
+                                      case 'delete':
+                                        handleDeleteVisit(visitLog);
+                                        break;
+                                    }
+                                  }} />
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Pagination */}
+                {totalPages > 1 && (
+                  <div className="flex items-center justify-between px-4 py-3">
+                    <div className="flex items-center">
+                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                        Showing{" "}
+                        <span className="font-medium">{startIndex + 1}</span>
+                        {" "}to{" "}
+                        <span className="font-medium">
+                          {Math.min(endIndex, siteVisitHistory.length)}
+                        </span>
+                        {" "}of{" "}
+                        <span className="font-medium">{siteVisitHistory.length}</span>
+                        {" "}entries
+                      </span>
+                    </div>
+                    <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+                  </div>
+                )}
+              </>
+            )}
           </div>
-          <div className="flex justify-end gap-3 mt-4">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={() => setShowViewVisitModal(false)}
-            >
-              Close
-            </Button>
+        </ComponentCard>
+
+        {/* Success Modal */}
+        <Modal
+          isOpen={showSuccessModal}
+          onClose={() => setShowSuccessModal(false)}
+          className="max-w-md p-6"
+        >
+          <div className="text-center">
+            <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
+              <svg className="h-6 w-6 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+              </svg>
+            </div>
+            <div className="mt-3">
+              <h3 className="text-lg font-medium text-gray-900 dark:text-white">
+                Success!
+              </h3>
+              <div className="mt-2">
+                <p className="text-sm text-gray-500 dark:text-gray-400">
+                  Site visit has been saved successfully.
+                </p>
+              </div>
+            </div>
+            <div className="mt-5">
+              <Button
+                type="button"
+                variant="primary"
+                onClick={() => setShowSuccessModal(false)}
+                className="w-full"
+              >
+                Continue
+              </Button>
+            </div>
           </div>
         </Modal>
 
-        {/* Section 2: Add Site Visit Button */}
-        <div className="rounded-sm border border-stroke bg-white p-4 shadow-default dark:border-strokedark dark:bg-boxdark">
-          <div className="flex items-center justify-between">
-            <div className="flex items-center space-x-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary bg-opacity-10">
-                <svg className="h-5 w-5 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
-                </svg>
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-black dark:text-white">
-                  Site Visit Entry
-                </h3>
-                <p className="text-xs text-body dark:text-bodydark">
-                  Schedule or log a site visit for this pipeline
-                </p>
-              </div>
-            </div>
-            <Button
-              type="button"
-              variant="primary"
-              size="sm"
-              onClick={() => router.push(`/callpipeline/sitevisit/create?pipelineId=${pipelineId}`)}
-              className="flex items-center gap-2"
-            >
-              <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
-              </svg>
-              Add Visit
-            </Button>
+        {/* Edit Site Visit Modal */}
+        <Modal
+          isOpen={showEditModal}
+          onClose={() => {
+            setShowEditModal(false);
+            resetEditForm();
+          }}
+          className="max-w-4xl p-6"
+        >
+          <div className="mb-6">
+            <h4 className="text-lg font-medium text-gray-900 dark:text-white">
+              ✏️ Edit Site Visit
+            </h4>
+            <p className="mb-6 text-sm text-gray-500 dark:text-gray-400 lg:mb-7">
+              {editingVisit ? `Edit site visit #${editingVisit.site_visit_id}` : 'Edit site visit details'}
+            </p>
           </div>
-        </div>
-
-        {/* Section 3: Site Visit History Table */}
-        <div className="space-y-4">
-          {/* Table Header with Title */}
-          <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold text-gray-800 dark:text-white">
-                Site Visit History for Pipeline #{pipelineInfo.pipelineId}
-              </h2>
-              <p className="text-sm text-gray-500 dark:text-gray-400">
-                Total {pipelineVisitHistory.length} site visit {pipelineVisitHistory.length === 1 ? 'entry' : 'entries'}
-              </p>
-            </div>
-          </div>
-
-          {pipelineVisitHistory.length === 0 ? (
-            <div className="py-8 text-center bg-white dark:bg-white/[0.03] rounded-xl border border-gray-200 dark:border-white/[0.05]">
-              <p className="text-gray-500 dark:text-gray-400">
-                No site visit history found for this pipeline. Add the first site visit entry above.
-              </p>
-            </div>
-          ) : (
+          
+          {editingVisit && (
             <>
-              {/* Table */}
-              <div className="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-white/[0.05] dark:bg-white/[0.03]">
-                <div className="max-w-full overflow-x-auto">
-                  <div className="min-w-[1200px]">
-                    <Table>
-                      <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
-                        <TableRow>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Visit ID
-                          </TableCell>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Date & Time
-                          </TableCell>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Staff
-                          </TableCell>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Contact Result
-                          </TableCell>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Purpose
-                          </TableCell>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Photos
-                          </TableCell>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Remark
-                          </TableCell>
-                          <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                            Actions
-                          </TableCell>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
-                        {currentVisitHistory.map((visit) => {
-                          // Calculate duration if both start and end times exist
-                          let duration = 'N/A';
-                          if (visit.visitStartTime && visit.visitEndTime) {
-                            try {
-                              const start = new Date(`2000-01-01T${visit.visitStartTime}`);
-                              const end = new Date(`2000-01-01T${visit.visitEndTime}`);
-                              const diffMinutes = Math.floor((end.getTime() - start.getTime()) / (1000 * 60));
-                              if (diffMinutes > 0) {
-                                const hours = Math.floor(diffMinutes / 60);
-                                const remainingMinutes = diffMinutes % 60;
-                                duration = hours > 0 ? `${hours}h ${remainingMinutes}m` : `${diffMinutes}m`;
-                              }
-                            } catch {
-                              // Keep 'N/A' if calculation fails
-                            }
-                          }
-
-                          return (
-                            <TableRow key={`${visit.visitPipelineID}-${visit.visitLogOrderID}`}>
-                              {/* Visit ID */}
-                              <TableCell className="px-5 py-4">
-                                <span className="inline-flex items-center px-2 py-1 rounded-md text-xs font-mono font-medium bg-indigo-50 text-indigo-800 dark:bg-indigo-900/20 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800">
-                                  {visit.siteVisitId || `SV-${visit.visitLogOrderID}`}
-                                </span>
-                              </TableCell>
-                              
-                              {/* Date & Time */}
-                              <TableCell className="px-5 py-4">
-                                <div className="flex flex-col">
-                                  <span className="font-medium text-gray-800 dark:text-white text-sm">
-                                    {visit.visitDate}
-                                  </span>
-                                  <span className="text-xs text-gray-400">
-                                    {formatTime(visit.visitStartTime)} - {formatTime(visit.visitEndTime)}
-                                  </span>
-                                  {duration !== 'N/A' && (
-                                    <span className="text-xs text-gray-400">Duration: {duration}</span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              
-                              {/* Staff */}
-                              <TableCell className="px-5 py-4">
-                                <div className="flex items-center">
-                                  <div className="flex-shrink-0 h-8 w-8">
-                                    <div className="h-8 w-8 rounded-full bg-blue-100 dark:bg-blue-900/20 flex items-center justify-center">
-                                      <span className="text-xs font-medium text-blue-800 dark:text-blue-300">
-                                        {visit.attendees?.split(',')[0]?.trim()?.charAt(0)?.toUpperCase() || 'S'}
-                                      </span>
-                                    </div>
-                                  </div>
-                                  <div className="ml-3">
-                                    <p className="text-sm font-medium text-gray-900 dark:text-white">
-                                      {visit.attendees?.split(',')[0]?.trim() || 'Unknown Staff'}
-                                    </p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                                      Pipeline: {visit.visitPipelineID}
-                                    </p>
-                                  </div>
-                                </div>
-                              </TableCell>
-                              
-                              {/* Contact Result */}
-                              <TableCell className="px-5 py-4">
-                                <Badge
-                                  size="sm"
-                                  color={
-                                    visit.visitStatus === "Completed"
-                                      ? "success"
-                                      : visit.visitStatus === "No Show" || visit.visitStatus === "Cancelled"
-                                      ? "error"
-                                      : visit.visitStatus === "Postponed" || visit.visitStatus === "Scheduled"
-                                      ? "warning"
-                                      : "info"
-                                  }
-                                >
-                                  {visit.contactResultName || visit.visitStatus}
-                                </Badge>
-                              </TableCell>
-                              
-                              {/* Purpose */}
-                              <TableCell className="px-5 py-4">
-                                <div className="max-w-xs text-sm text-gray-600 dark:text-gray-300 truncate" title={visit.visitType}>
-                                  {visit.visitType}
-                                </div>
-                              </TableCell>
-                              
-                              {/* Photos */}
-                              <TableCell className="px-5 py-4">
-                                <div className="flex items-center space-x-2">
-                                  {visit.photoUrls && visit.photoUrls.length > 0 ? (
-                                    <>
-                                      <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-300">
-                                        {visit.photoUrls.length} photo{visit.photoUrls.length > 1 ? 's' : ''}
-                                      </span>
-                                    </>
-                                  ) : (
-                                    <span className="text-xs text-gray-400">No photos</span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              
-                              {/* Remark */}
-                              <TableCell className="px-5 py-4">
-                                <div className="max-w-xs text-sm text-gray-600 dark:text-gray-300 truncate" title={visit.notes}>
-                                  {visit.notes || 'No remark'}
-                                </div>
-                              </TableCell>
-                              
-                              {/* Actions */}
-                              <TableCell className="px-4 py-3 text-start">
-                                <ActionMenu visitLog={visit} onSelect={handleActionSelect} />
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 mb-6">
+                <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-3 dark:border-gray-700 dark:from-blue-900/20 dark:to-indigo-900/20">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Visit ID</h3>
+                    <p className="text-sm font-bold text-blue-800 dark:text-blue-200">#{editingVisit.site_visit_id}</p>
+                  </div>
+                </div>
+                <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-green-50 to-emerald-50 p-3 dark:border-gray-700 dark:from-green-900/20 dark:to-emerald-900/20">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Lead</h3>
+                    <p className="text-sm font-bold text-green-800 dark:text-green-200">{editingVisit.lead_name}</p>
+                  </div>
+                </div>
+                <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-purple-50 to-pink-50 p-3 dark:border-gray-700 dark:from-purple-900/20 dark:to-pink-900/20">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-gray-900 dark:text-white">Pipeline</h3>
+                    <p className="text-sm font-bold text-purple-800 dark:text-purple-200">#{editingVisit.call_id}</p>
                   </div>
                 </div>
               </div>
-
-              {/* Pagination - Using the same design as CallLogsTable */}
-              {totalPages > 1 && (
-                <div className="flex items-center justify-between px-4 py-3">
-                  <div className="flex items-center">
-                    <span className="text-sm text-gray-700 dark:text-gray-300">
-                      Showing{" "}
-                      <span className="font-medium">{startIndex + 1}</span>
-                      {" "}to{" "}
-                      <span className="font-medium">
-                        {Math.min(endIndex, pipelineVisitHistory.length)}
-                      </span>
-                      {" "}of{" "}
-                      <span className="font-medium">{pipelineVisitHistory.length}</span>
-                      {" "}entries
-                    </span>
+              
+              <div className="space-y-6">
+                <div className="grid grid-cols-1 gap-x-6 gap-y-5 lg:grid-cols-4">
+                  <div>
+                    <DatePicker
+                      id="edit-site-visit-date-picker"
+                      label="Visit Date *"
+                      placeholder="Select visit date"
+                      defaultDate={editFormData.visitDate}
+                      onChange={(selectedDates) => {
+                        if (selectedDates && selectedDates.length > 0) {
+                          handleEditFormChange('visitDate', selectedDates[0]);
+                        }
+                      }}
+                    />
+                    {editErrors.visitDate && <p className="text-sm text-red-500 mt-1">{editErrors.visitDate}</p>}
                   </div>
-                  <Pagination currentPage={currentPage} totalPages={totalPages} onPageChange={setCurrentPage} />
+                  
+                  <div>
+                    <Label htmlFor="editSiteVisitStartTime">Start Time *</Label>
+                    <div className="relative">
+                      <InputField
+                        type="time"
+                        id="editSiteVisitStartTime"
+                        value={editFormData.visitStartTime}
+                        onChange={(e) => handleEditFormChange('visitStartTime', e.target.value)}
+                        error={!!editErrors.visitStartTime}
+                      />
+                      <span className="absolute text-gray-500 -translate-y-1/2 pointer-events-none right-3 top-1/2 dark:text-gray-400">
+                        <TimeIcon />
+                      </span>
+                    </div>
+                    {editErrors.visitStartTime && <p className="text-sm text-red-500 mt-1">{editErrors.visitStartTime}</p>}
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="editSiteVisitEndTime">End Time</Label>
+                    <div className="relative">
+                      <InputField
+                        type="time"
+                        id="editSiteVisitEndTime"
+                        value={editFormData.visitEndTime}
+                        onChange={(e) => handleEditFormChange('visitEndTime', e.target.value)}
+                        error={!!editErrors.visitEndTime}
+                      />
+                      <span className="absolute text-gray-500 -translate-y-1/2 pointer-events-none right-3 top-1/2 dark:text-gray-400">
+                        <TimeIcon />
+                      </span>
+                    </div>
+                    {editErrors.visitEndTime && <p className="text-sm text-red-500 mt-1">{editErrors.visitEndTime}</p>}
+                  </div>
+                  
+                  <div>
+                    <Label htmlFor="editSiteVisitContactResult">Contact Result *</Label>
+                    <Select
+                      placeholder={isLoadingStatus ? "Loading..." : "Select status"}
+                      options={statusOptions}
+                      value={editFormData.contactResult}
+                      onChange={(option) => handleEditFormChange('contactResult', option)}
+                    />
+                    {editErrors.contactResult && <p className="text-sm text-red-500 mt-1">{editErrors.contactResult}</p>}
+                  </div>
                 </div>
-              )}
+
+                <div>
+                  <Label htmlFor="editSiteVisitPurpose">Purpose</Label>
+                  <InputField
+                    id="editSiteVisitPurpose"
+                    value={editFormData.purpose}
+                    onChange={(e) => handleEditFormChange('purpose', e.target.value)}
+                    placeholder="Enter visit purpose"
+                  />
+                </div>
+
+                <div>
+                  <Label htmlFor="editSiteVisitFollowUpToggle">Follow-up Required</Label>
+                  <div className="flex items-center">
+                    <label className="inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        id="editSiteVisitFollowUpToggle"
+                        checked={editFormData.isFollowUp}
+                        onChange={(e) => handleEditFormChange('isFollowUp', e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
+                        editFormData.isFollowUp ? 'bg-brand-500' : 'bg-gray-200 dark:bg-gray-700'
+                      }`}>
+                        <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${
+                          editFormData.isFollowUp ? 'transform translate-x-5' : ''
+                        }`}></div>
+                      </div>
+                    </label>
+                  </div>
+                  {editErrors.isFollowUp && <p className="text-sm text-red-500 mt-1">{editErrors.isFollowUp}</p>}
+                </div>
+                
+                {editFormData.isFollowUp && (
+                  <div>
+                    <DatePicker
+                      id="edit-site-visit-follow-up-date-picker"
+                      label="Follow-up Date *"
+                      placeholder="Select follow-up date"
+                      defaultDate={editFormData.followUpDate || undefined}
+                      onChange={(selectedDates) => {
+                        if (selectedDates && selectedDates.length > 0) {
+                          handleEditFormChange('followUpDate', selectedDates[0]);
+                        }
+                      }}
+                    />
+                    {editErrors.followUpDate && <p className="text-sm text-red-500 mt-1">{editErrors.followUpDate}</p>}
+                  </div>
+                )}
+                
+                <div>
+                  <Label htmlFor="editSiteVisitNotes">Notes/Remarks *</Label>
+                  <TextArea
+                    value={editFormData.notes}
+                    onChange={(value) => handleEditFormChange('notes', value)}
+                    placeholder="Enter notes or remarks about the site visit"
+                    rows={4}
+                    error={!!editErrors.notes}
+                  />
+                  {editErrors.notes && <p className="text-sm text-red-500 mt-1">{editErrors.notes}</p>}
+                </div>
+                
+                <div>
+                  <Label>Additional Photos</Label>
+                  <PhotoUpload photos={editPhotos} onPhotosChange={setEditPhotos} />
+                  <p className="text-xs text-gray-500 mt-1">Upload additional photos (existing photos will be preserved)</p>
+                </div>
+                
+                <div className="flex justify-end gap-3 pt-4 border-t border-gray-200 dark:border-gray-700">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => {
+                      setShowEditModal(false);
+                      resetEditForm();
+                    }}
+                    disabled={isEditingSubmitting}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={handleEditSubmit}
+                    disabled={isEditingSubmitting}
+                  >
+                    {isEditingSubmitting ? "Updating..." : "Update Site Visit"}
+                  </Button>
+                </div>
+              </div>
             </>
           )}
-        </div>
+        </Modal>
       </div>
     </div>
   );

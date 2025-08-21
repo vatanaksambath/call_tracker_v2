@@ -31,8 +31,8 @@ export default function PhoneInput({
     // Remove all non-digits
     const numbers = input.replace(/\D/g, "");
     
-    // Limit to 9 digits (without country code)
-    const limitedNumbers = numbers.slice(0, 9);
+    // Limit to 10 digits (without country code)
+    const limitedNumbers = numbers.slice(0, 10);
     
     // Apply formatting
     if (limitedNumbers.length <= 3) {

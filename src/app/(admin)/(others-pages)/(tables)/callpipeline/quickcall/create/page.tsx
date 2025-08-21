@@ -27,9 +27,204 @@ interface PipelineInfo {
   propertyLocation: string;
   callerName: string;
   callerPhone: string;
+  leadPhone: string;
 }
 
 export default function QuickCallCreatePage() {
+  // Add missing state for compatibility with CallLogsTable.tsx logic
+  const [leadContactData, setLeadContactData] = useState<any[]>([]);
+  const [contactOptions, setContactOptions] = useState<any[]>([]);
+  // Generic handler for form field changes
+  const handleChange = (field: keyof typeof formData, value: any) => {
+    setFormData((prev) => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors((prev) => ({ ...prev, [field]: '' }));
+  };
+  // Handle Save Call Log
+  const handleSave = async () => {
+  console.log('--- Save Call Log button was clicked ---');
+    if (!formData || !pipelineInfo) return;
+    // You may want to add your own validate() function here for stricter validation
+    // For now, just check required fields
+    if (!formData.callDate || !formData.callStartTime || !formData.callStatus) {
+      setErrors({ callDate: !formData.callDate ? 'Call date required' : '', callStartTime: !formData.callStartTime ? 'Start time required' : '', callStatus: !formData.callStatus ? 'Status required' : '' });
+      return;
+    }
+    try {
+      setIsSubmitting(true);
+
+      // DEBUG: Log form data at the start
+      console.log("=== QUICK CALL SAVE DEBUG ===");
+      console.log("1. Form Data:", JSON.stringify(formData, null, 2));
+      console.log("2. Pipeline Info:", JSON.stringify(pipelineInfo, null, 2));
+      console.log("3. Contact Options Available:", contactOptions.length, contactOptions);
+      console.log("4. Lead Contact Data:", JSON.stringify(leadContactData, null, 2));
+
+      // DEBUG: Specific phone number values
+      console.log("DEBUG - callerPhone value:", pipelineInfo.callerPhone);
+      console.log("DEBUG - leadPhone value:", pipelineInfo.leadPhone);
+      console.log("DEBUG - leadPhone type:", typeof pipelineInfo.leadPhone);
+      console.log("DEBUG - leadPhone length:", pipelineInfo.leadPhone ? pipelineInfo.leadPhone.length : 'null/undefined');
+
+      // Filter contact data to find contacts matching pipelineInfo.callerPhone or leadPhone
+      const matchingContactData: any[] = [];
+      const callerPhone = (pipelineInfo.callerPhone || '').replace(/\D/g, ''); // Remove non-digits
+      const leadPhone = (pipelineInfo.leadPhone || '').replace(/\D/g, ''); // Remove non-digits
+      console.log("5. Caller phone (cleaned):", callerPhone);
+      console.log("5. Lead phone (cleaned):", leadPhone);
+
+      if (leadContactData && leadContactData.length > 0) {
+        console.log("6. Processing leadContactData to find matching contacts...");
+        for (const contactGroup of leadContactData) {
+          if (contactGroup.contact_values && Array.isArray(contactGroup.contact_values)) {
+            const matchingContacts = contactGroup.contact_values.filter((contact: any) => {
+              if (contact.contact_number) {
+                const contactPhone = contact.contact_number.replace(/\D/g, ''); // Remove non-digits
+                const isCallerMatch = contactPhone === callerPhone;
+                const isLeadMatch = contactPhone === leadPhone;
+                const isMatch = isCallerMatch || isLeadMatch;
+                return isMatch;
+              }
+              return false;
+            });
+            if (matchingContacts.length > 0) {
+              // Structure the contact data as required by the API
+              matchingContactData.push({
+                channel_type_id: String(contactGroup.channel_type_id),
+                contact_values: matchingContacts.map((contact: any) => ({
+                  user_name: contact.user_name,
+                  contact_number: contact.contact_number,
+                  remark: contact.remark || "Mobile",
+                  is_primary: contact.is_primary
+                }))
+              });
+            }
+          }
+        }
+      }
+
+      console.log("9. All matching contact data:", JSON.stringify(matchingContactData, null, 2));
+
+      if (matchingContactData.length === 0) {
+        alert(`No contact data found matching the caller phone (${pipelineInfo.callerPhone}) or lead phone (${pipelineInfo.leadPhone}). Please ensure the lead has the correct contact information.`);
+        setIsSubmitting(false);
+        return;
+      }
+
+      const callDate = formData.callDate instanceof Date 
+        ? formData.callDate.toISOString().split('T')[0]
+        : formData.callDate;
+      console.log("11. Processed call date:", callDate);
+
+      const callStartDatetime = `${callDate} ${formData.callStartTime}:00`;
+      const callEndDatetime = formData.callEndTime 
+        ? `${callDate} ${formData.callEndTime}:00`
+        : "";
+      console.log("10. Call datetime strings:");
+
+      const getContactResultId = (status: string): string => {
+        return status || "1";
+      };
+      const contactResultId = getContactResultId(formData.callStatus?.value || "");
+      console.log("11. Contact Result ID:", contactResultId, "from status:", formData.callStatus);
+
+      // Prepare follow-up date if enabled
+      let followUpDate = null;
+      if (formData.isFollowUp && formData.followUpDate instanceof Date) {
+        const d = formData.followUpDate;
+        followUpDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+      console.log("12. Follow-up processing:");
+
+      // STEP 1: Create call log detail (without follow-up fields)
+      const callLogDetailRequestBody = {
+        call_log_id: pipelineInfo.pipelineId,
+        contact_result_id: contactResultId,
+        call_start_datetime: callStartDatetime,
+        call_end_datetime: callEndDatetime,
+        remark: formData.notes || null,
+        menu_id: "MU_02",
+        contact_data: matchingContactData
+      };
+      console.log("=== STEP 1: CALL LOG DETAIL API REQUEST ===");
+
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      console.log("13. Step 1 API Details:");
+      // Call the first API to create call log detail
+      const callLogDetailResponse = await fetch(`${apiBase}/call-log-detail/create`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(callLogDetailRequestBody),
+      });
+      console.log("📡 API CALL 1 COMPLETED");
+      console.log("14. Step 1 API Response Status:", callLogDetailResponse.status, callLogDetailResponse.statusText);
+      if (!callLogDetailResponse.ok) {
+        throw new Error(`Call log detail creation failed with status ${callLogDetailResponse.status}`);
+      }
+      const callLogDetailResponseData = await callLogDetailResponse.json();
+
+      // STEP 2: Update call log with follow-up information (if follow-up is enabled)
+      if (formData.isFollowUp && followUpDate) {
+        // We need to get the current call log data first to preserve existing details
+        const getCurrentCallLogResponse = await fetch(`${apiBase}/call-log/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            page_number: "1",
+            page_size: "10",
+            search_type: "call_log_id",
+            query_search: pipelineInfo.pipelineId,
+          }),
+        });
+        if (getCurrentCallLogResponse.ok) {
+          const currentCallLogData = await getCurrentCallLogResponse.json();
+          if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
+            const currentLog = currentCallLogData[0].data[0];
+            // Prepare the call log update request with the expected structure (no call log detail fetch)
+            const callLogUpdateRequestBody = {
+              call_log_id: pipelineInfo.pipelineId,
+              lead_id: currentLog.lead_id,
+              property_profile_id: String(currentLog.property_profile_id),
+              status_id: String(currentLog.status_id || "1"),
+              purpose: currentLog.purpose || "Call pipeline management",
+              fail_reason: currentLog.fail_reason || null,
+              follow_up_date: followUpDate, // Updated field
+              is_follow_up: formData.isFollowUp, // Updated field
+              is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
+              updated_by: "1" // You might want to get this from user context
+            };
+            console.log("=== STEP 2: CALL LOG UPDATE API REQUEST ===");
+            console.log("17. Step 2 API Details:", callLogUpdateRequestBody);
+            // Call the second API to update call log with follow-up information
+            const callLogUpdateResponse = await fetch(`${apiBase}/call-log/update`, {
+              method: "PUT",
+              headers,
+              body: JSON.stringify(callLogUpdateRequestBody),
+            });
+            console.log("📡 API CALL 2 COMPLETED");
+            console.log("18. Step 2 API Response Status:", callLogUpdateResponse.status, callLogUpdateResponse.statusText);
+            if (!callLogUpdateResponse.ok) {
+              await callLogUpdateResponse.json().catch(() => ({}));
+              // Don't throw error here, as the call log detail was already created successfully
+            } else {
+              await callLogUpdateResponse.json();
+            }
+          }
+        }
+      }
+
+      console.log("=== END QUICK CALL SAVE DEBUG ===");
+      setShowSuccessModal(true);
+    } catch (error) {
+      console.error("Error saving call log:", error);
+      alert("Failed to save call log. Please try again.");
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
   const router = useRouter();
   const searchParams = useSearchParams();
   const pipelineId = searchParams.get('pipelineId') || '';
@@ -54,22 +249,27 @@ export default function QuickCallCreatePage() {
       }
 
       try {
-        // TODO: Replace with actual API call when backend is ready
-        // const response = await api.get(`/pipeline/${pipelineId}`);
-        // setPipelineInfo(response.data);
-        
         // For now, get from sample data
-        const pipeline = callLogsData.find(log => log.id.toString() === pipelineId);
+        const pipeline = callLogsData.find(log => {
+          // Try to match by call_log_id (real API)
+          if (log.call_log_id && log.call_log_id.toString() === pipelineId) return true;
+          // For mock data, allow type assertion to any
+          const anyLog = log as any;
+          return anyLog.id && anyLog.id.toString() === pipelineId;
+        });
         if (pipeline) {
+          // Use type assertion for mock data fields
+          const anyPipeline = pipeline as any;
           setPipelineInfo({
-            pipelineId: pipeline.id.toString(),
-            pipelineName: `${pipeline.lead.name} - ${pipeline.Property.name}`,
-            leadName: pipeline.lead.name,
-            leadCompany: pipeline.lead.company,
-            propertyName: pipeline.Property.name,
-            propertyLocation: pipeline.Property.Location,
-            callerName: pipeline.caller.name,
-            callerPhone: pipeline.caller.phone
+            pipelineId: pipeline.call_log_id ? pipeline.call_log_id.toString() : (anyPipeline.id?.toString() || ''),
+            pipelineName: `${pipeline.lead_name || anyPipeline.lead?.name || 'Unknown Lead'} - ${pipeline.property_profile_name || anyPipeline.Property?.name || 'Unknown Property'}`,
+            leadName: pipeline.lead_name || anyPipeline.lead?.name || '',
+            leadCompany: anyPipeline.lead?.company || '',
+            propertyName: pipeline.property_profile_name || anyPipeline.Property?.name || '',
+            propertyLocation: pipeline.property_type_name || anyPipeline.Property?.Location || '',
+            callerName: pipeline.created_by_name || anyPipeline.caller?.name || '',
+            callerPhone: pipeline.phone_number || anyPipeline.caller?.phone || '',
+            leadPhone: anyPipeline.lead?.phone || ''
           });
         }
       } catch (error) {
@@ -155,100 +355,6 @@ export default function QuickCallCreatePage() {
             value: result.contact_result_id.toString(),
             label: result.contact_result_name
           }));
-          
-          setStatusOptions(options);
-        }
-      } catch (error) {
-        console.error("Error loading contact results:", error);
-        // Set fallback options if API fails
-        setStatusOptions([
-          { value: "1", label: "No Answer" },
-          { value: "2", label: "Busy" },
-          { value: "3", label: "Voicemail" },
-          { value: "4", label: "Answered" },
-          { value: "5", label: "Callback Requested" },
-          { value: "6", label: "Not Interested" },
-          { value: "7", label: "Follow-up Scheduled" },
-        ]);
-      }
-    };
-    
-    loadContactResults();
-  }, []);
-
-  const handleChange = (field: keyof typeof formData, value: Date | string | SelectOption | null | boolean) => {
-    setFormData((prev) => ({ ...prev, [field]: value }));
-    if (errors[field]) {
-      setErrors(prevErrors => {
-        const newErrors = { ...prevErrors };
-        delete newErrors[field];
-        return newErrors;
-      });
-    }
-  };
-
-  const validate = () => {
-    const newErrors: {[key: string]: string} = {};
-    
-    if (!formData.callDate) newErrors.callDate = "Call date is required.";
-    if (!formData.callStartTime) newErrors.callStartTime = "Start time is required.";
-    if (!formData.callStatus) newErrors.callStatus = "Call status is required.";
-    if (!formData.notes.trim()) newErrors.notes = "Call notes are required.";
-    
-    // Validate follow-up date if follow-up is required
-    if (formData.isFollowUp && !formData.followUpDate) {
-      newErrors.followUpDate = "Follow-up date is required when follow-up is enabled.";
-    }
-    
-    // Validate time format and logic
-    if (formData.callStartTime && formData.callEndTime) {
-      const startTime = new Date(`2000-01-01T${formData.callStartTime}`);
-      const endTime = new Date(`2000-01-01T${formData.callEndTime}`);
-      if (endTime <= startTime) {
-        newErrors.callEndTime = "End time must be after start time.";
-      }
-    }
-    
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const handleSave = async () => {
-    if (!validate()) return;
-    
-    try {
-      setIsSubmitting(true);
-      
-      const callLogData = {
-        pipelineId,
-        callDate: formData.callDate,
-        callStartTime: formData.callStartTime,
-        callEndTime: formData.callEndTime,
-        callStatus: formData.callStatus?.value,
-        notes: formData.notes,
-        isFollowUp: formData.isFollowUp,
-        followUpDate: formData.followUpDate,
-        createdAt: new Date().toISOString(),
-      };
-      
-      console.log("Call Log Data to submit:", callLogData);
-      
-      // TODO: Replace with actual API call when backend is ready
-      // await api.post('/call-logs', callLogData);
-      
-      // Simulate API call
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      // Show success modal
-      setShowSuccessModal(true);
-      
-    } catch (error) {
-      console.error("Error saving call log:", error);
-      alert("Failed to save call log. Please try again.");
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleCloseModal = () => {
     setShowInputModal(false);

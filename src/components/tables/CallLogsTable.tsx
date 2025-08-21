@@ -28,7 +28,7 @@ import Select from "../form/Select";
 import DatePicker from "../form/date-picker";
 import TextArea from "../form/input/TextArea";
 import InputField from "../form/input/InputField";
-import PhotoUpload, { PhotoFile } from "../form/PhotoUpload";
+import PhotoUpload, { PhotoFile } from "@/components/form/PhotoUpload";
 import { TimeIcon } from "@/icons";
 
 // Format phone number to (+855) 000-000-0000 format
@@ -294,12 +294,14 @@ export default function CallLogsTable({
   
   // Quick Site Visit Form State
   const [siteVisitFormData, setSiteVisitFormData] = useState({
-    visitDate: "",
-    visitStartTime: "",
-    visitEndTime: "",
-    contactResult: null as SelectOption | null,
-    purpose: "",
-    notes: "",
+  visitDate: "",
+  visitStartTime: "",
+  visitEndTime: "",
+  contactResult: null as SelectOption | null,
+  purpose: "",
+  notes: "",
+  is_follow_up: false,
+  follow_up_date: null as Date | null,
   });
   const [siteVisitPhotos, setSiteVisitPhotos] = useState<PhotoFile[]>([]);
   
@@ -311,6 +313,8 @@ export default function CallLogsTable({
     contactResult?: string;
     purpose?: string;
     notes?: string;
+    is_follow_up?: string;
+    follow_up_date?: string;
   }>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showSuccessModal, setShowSuccessModal] = useState(false);
@@ -353,38 +357,24 @@ export default function CallLogsTable({
               query_search: leadId,
             })
           });
-          
           if (response.ok) {
             const data = await response.json();
-            
             if (Array.isArray(data) && data.length > 0 && data[0].data && Array.isArray(data[0].data)) {
               const leadData = data[0].data[0];
-              
-              // Extract phone number from contact_data
               if (leadData.contact_data && Array.isArray(leadData.contact_data)) {
                 let phoneNumber = 'Unknown Number';
-                
-                console.log(`DEBUG - Processing lead ${leadId} contact_data:`, leadData.contact_data);
-                
                 // Look for contact with channel_type_id: 3 and is_primary: true
                 for (const contactGroup of leadData.contact_data) {
-                  console.log(`DEBUG - Contact group channel_type_id: ${contactGroup.channel_type_id}`);
                   if (contactGroup.channel_type_id === 3 && contactGroup.contact_values && Array.isArray(contactGroup.contact_values)) {
-                    console.log(`DEBUG - Found channel_type_id 3, checking contact_values:`, contactGroup.contact_values);
                     const primaryContact = contactGroup.contact_values.find((contact: { is_primary: boolean; contact_number: string }) =>
                       contact.is_primary === true && contact.contact_number
                     );
                     if (primaryContact) {
                       phoneNumber = primaryContact.contact_number;
-                      console.log(`DEBUG - Found primary contact with phone: ${phoneNumber}`);
                       break;
-                    } else {
-                      console.log(`DEBUG - No primary contact found in this group`);
                     }
                   }
                 }
-                
-                console.log(`DEBUG - Final phone number for lead ${leadId}: ${phoneNumber}`);
                 phoneNumberMap[leadId] = phoneNumber;
               } else {
                 phoneNumberMap[leadId] = 'Unknown Number';
@@ -392,16 +382,12 @@ export default function CallLogsTable({
             }
           }
         } catch (error) {
-          console.error(`Error fetching phone number for lead ${leadId}:`, error);
           phoneNumberMap[leadId] = 'Unknown Number';
         }
       }
       
       setLeadPhoneNumbers(prev => ({ ...prev, ...phoneNumberMap }));
-      console.log("=== PHONE NUMBER EXTRACTION SUMMARY ===");
-      console.log("Phone numbers loaded:", phoneNumberMap);
-      console.log("Total leads processed:", Object.keys(phoneNumberMap).length);
-      console.log("========================================");
+  // ...
     } catch (error) {
       console.error("Error fetching lead phone numbers:", error);
     } finally {
@@ -412,7 +398,7 @@ export default function CallLogsTable({
   // Effect to fetch phone numbers when data changes
   React.useEffect(() => {
     const uniqueLeadIds = Array.from(new Set(data.map(callLog => callLog.lead_id).filter(Boolean)));
-    console.log("Effect running - unique lead IDs:", uniqueLeadIds);
+  // ...
     if (uniqueLeadIds.length > 0) {
       fetchLeadPhoneNumbers(uniqueLeadIds);
     }
@@ -440,7 +426,7 @@ export default function CallLogsTable({
           })
         });
         const data = await response.json();
-        console.log("Contact Result API response:", data);
+  // ...
         const apiResult = data[0];
         if (apiResult && apiResult.data) {
           setStatusOptions(apiResult.data.map((result: { contact_result_id: number, contact_result_name: string }) => ({ 
@@ -449,7 +435,7 @@ export default function CallLogsTable({
           })));
         }
       } catch (err) {
-        console.error("Contact Result API error:", err);
+  // ...
         setStatusOptions([]);
       }
     }
@@ -468,7 +454,6 @@ export default function CallLogsTable({
       await loadPipelineInfo(callLog.call_log_id || '');
       setShowQuickCallModal(true);
     } catch (error) {
-      console.error("Error loading pipeline info for quick call:", error);
       alert("Failed to load pipeline information. Please try again.");
     } finally {
       setIsLoadingPipeline(false);
@@ -485,7 +470,6 @@ export default function CallLogsTable({
       await loadPipelineInfo(callLog.call_log_id || '');
       setShowQuickSiteVisitModal(true);
     } catch (error) {
-      console.error("Error loading pipeline info for quick site visit:", error);
       alert("Failed to load pipeline information. Please try again.");
     } finally {
       setIsLoadingPipeline(false);
@@ -501,24 +485,19 @@ export default function CallLogsTable({
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      
       const body = {
         page_number: "1",
         page_size: "10",
         search_type: "call_log_id",
         query_search: pipelineId,
       };
-      
       const res = await fetch(`${apiBase}/call-log/pagination`, {
         method: "POST",
         headers,
         body: JSON.stringify(body),
       });
-      
       if (!res.ok) throw new Error("Failed to fetch call log data");
-      
       const data = await res.json();
-      
       let logArr = [];
       if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
         logArr = data[0].data;
@@ -527,22 +506,10 @@ export default function CallLogsTable({
       } else if (Array.isArray(data?.results)) {
         logArr = data.results;
       }
-      
       if (logArr.length > 0) {
         const log = logArr[0];
-        
-        // DEBUG: Log phone extraction values
         const extractedCallerPhone = leadPhoneNumbers[log.lead_id] || "N/A";
         const extractedLeadPhone = leadPhoneNumbers[log.lead_id] || "N/A";
-        
-        console.log("=== PIPELINE INFO LOADING DEBUG ===");
-        console.log("Log data:", log);
-        console.log("Lead ID:", log.lead_id);
-        console.log("Phone from leadPhoneNumbers map:", leadPhoneNumbers[log.lead_id]);
-        console.log("Extracted callerPhone:", extractedCallerPhone);
-        console.log("Extracted leadPhone:", extractedLeadPhone);
-        console.log("=====================================");
-        
         setPipelineInfo({
           pipelineId: log.call_log_id || "",
           pipelineName: `${log.lead_name || 'Unknown Lead'} - ${log.property_profile_name || 'Unknown Property'}`,
@@ -560,7 +527,6 @@ export default function CallLogsTable({
         });
       }
     } catch (error) {
-      console.error("Error loading pipeline information:", error);
       throw error;
     }
   }, [leadPhoneNumbers]);
@@ -570,10 +536,7 @@ export default function CallLogsTable({
     const fetchContactOptions = async () => {
       if (!pipelineInfo || !showQuickCallModal) return;
 
-      // Debug log to see the caller phone value
-      console.log("DEBUG - pipelineInfo.callerPhone:", pipelineInfo.callerPhone);
-      console.log("DEBUG - pipelineInfo.leadPhone:", pipelineInfo.leadPhone);
-      console.log("DEBUG - pipelineInfo:", pipelineInfo);
+  // ...
 
       try {
         setIsLoadingContacts(true);
@@ -605,7 +568,7 @@ export default function CallLogsTable({
         
         if (Array.isArray(data) && data.length > 0 && data[0].data && Array.isArray(data[0].data)) {
           const leadData = data[0].data[0];
-          console.log("DEBUG - leadData.contact_data:", leadData.contact_data);
+    // ...
           if (leadData.contact_data && Array.isArray(leadData.contact_data)) {
             setLeadContactData(leadData.contact_data);
             
@@ -733,9 +696,7 @@ export default function CallLogsTable({
                 const isCallerMatch = contactPhone === callerPhone;
                 const isLeadMatch = contactPhone === leadPhone;
                 const isMatch = isCallerMatch || isLeadMatch;
-                console.log(`7. Comparing: ${contactPhone} === ${callerPhone} (caller) = ${isCallerMatch}`);
-                console.log(`7. Comparing: ${contactPhone} === ${leadPhone} (lead) = ${isLeadMatch}`);
-                console.log(`7. Overall match: ${isMatch}`);
+                    // ...
                 return isMatch;
               }
               return false;
@@ -752,19 +713,17 @@ export default function CallLogsTable({
                   is_primary: contact.is_primary
                 }))
               });
-              console.log("8. Found matching contact group:", {
-                channel_type_id: contactGroup.channel_type_id,
-                matching_contacts_count: matchingContacts.length
-              });
+              // ...
             }
           }
         }
       }
 
       console.log("9. All matching contact data:", JSON.stringify(matchingContactData, null, 2));
+  // ...
 
       if (matchingContactData.length === 0) {
-        console.error("No contact data matching caller or lead phone found");
+  // ...
         alert(`No contact data found matching the caller phone (${pipelineInfo.callerPhone}) or lead phone (${pipelineInfo.leadPhone}). Please ensure the lead has the correct contact information.`);
         return;
       }
@@ -774,6 +733,7 @@ export default function CallLogsTable({
         : formData.callDate;
       
       console.log("11. Processed call date:", callDate);
+  // ...
       
       const callStartDatetime = `${callDate} ${formData.callStartTime}:00`;
       const callEndDatetime = formData.callEndTime 
@@ -781,8 +741,7 @@ export default function CallLogsTable({
         : "";
 
       console.log("10. Call datetime strings:");
-      console.log("    - Start:", callStartDatetime);
-      console.log("    - End:", callEndDatetime);
+  // ...
 
       const getContactResultId = (status: string): string => {
         // Since we're now using the API contact_result_id directly as the value,
@@ -792,74 +751,141 @@ export default function CallLogsTable({
 
       const contactResultId = getContactResultId(formData.callStatus?.value || "");
       console.log("11. Contact Result ID:", contactResultId, "from status:", formData.callStatus);
+  // ...
 
       // Prepare follow-up date if enabled
-      const followUpDate = formData.isFollowUp && formData.followUpDate 
-        ? formData.followUpDate.toISOString().split('T')[0]
-        : null;
+      // Format follow-up date as local date (YYYY-MM-DD) if enabled
+      let followUpDate = null;
+      if (formData.isFollowUp && formData.followUpDate instanceof Date) {
+        const d = formData.followUpDate;
+        followUpDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
 
       console.log("12. Follow-up processing:");
-      console.log("    - isFollowUp:", formData.isFollowUp);
-      console.log("    - followUpDate object:", formData.followUpDate);
-      console.log("    - followUpDate string:", followUpDate);
+  // ...
 
-      const apiRequestBody = {
+      // STEP 1: Create call log detail (without follow-up fields)
+      const callLogDetailRequestBody = {
         call_log_id: pipelineInfo.pipelineId,
         contact_result_id: contactResultId,
         call_start_datetime: callStartDatetime,
         call_end_datetime: callEndDatetime,
         remark: formData.notes || null,
         menu_id: "MU_02",
-        contact_data: matchingContactData,
-        is_follow_up: formData.isFollowUp,
-        follow_up_date: followUpDate
+        contact_data: matchingContactData
       };
 
-      console.log("=== FINAL API REQUEST BODY ===");
-      console.log(JSON.stringify(apiRequestBody, null, 2));
-      console.log("=============================");
+      console.log("=== STEP 1: CALL LOG DETAIL API REQUEST ===");
+  // ...
       
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      console.log("16. API Details:");
-      console.log("    - URL:", `${apiBase}/call-log-detail/create`);
-      console.log("    - Headers:", headers);
-      
-      const response = await fetch(`${apiBase}/call-log-detail/create`, {
+      console.log("13. Step 1 API Details:");
+  // ...
+      // Call the first API to create call log detail
+      const callLogDetailResponse = await fetch(`${apiBase}/call-log-detail/create`, {
         method: "POST",
         headers,
-        body: JSON.stringify(apiRequestBody),
+        body: JSON.stringify(callLogDetailRequestBody),
       });
+      console.log("📡 API CALL 1 COMPLETED");
+  // ...
 
-      console.log("17. API Response Status:", response.status, response.statusText);
+      console.log("14. Step 1 API Response Status:", callLogDetailResponse.status, callLogDetailResponse.statusText);
+  // ...
       
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        console.error("18. API Error Response:", JSON.stringify(errorData, null, 2));
-        throw new Error(errorData.message || `API request failed with status ${response.status}`);
+      if (!callLogDetailResponse.ok) {
+  throw new Error(`Call log detail creation failed with status ${callLogDetailResponse.status}`);
       }
       
-      const responseData = await response.json();
-      console.log("18. Quick Call API Success Response:", JSON.stringify(responseData, null, 2));
-      console.log("=== END QUICK CALL SAVE DEBUG ===");
+      const callLogDetailResponseData = await callLogDetailResponse.json();
+  // ...
+
+      // STEP 2: Update call log with follow-up information (if follow-up is enabled)
+      if (formData.isFollowUp && followUpDate) {
+  // ...
+        
+        // We need to get the current call log data first to preserve existing details
+        const getCurrentCallLogResponse = await fetch(`${apiBase}/call-log/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            page_number: "1",
+            page_size: "10",
+            search_type: "call_log_id",
+            query_search: pipelineInfo.pipelineId,
+          }),
+        });
+        if (getCurrentCallLogResponse.ok) {
+          const currentCallLogData = await getCurrentCallLogResponse.json();
+          if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
+            const currentLog = currentCallLogData[0].data[0];
+            // Prepare the call log update request with the expected structure (no call log detail fetch)
+            const callLogUpdateRequestBody = {
+              call_log_id: pipelineInfo.pipelineId,
+              lead_id: currentLog.lead_id,
+              property_profile_id: String(currentLog.property_profile_id),
+              status_id: String(currentLog.status_id || "1"),
+              purpose: currentLog.purpose || "Call pipeline management",
+              fail_reason: currentLog.fail_reason || null,
+              follow_up_date: followUpDate, // Updated field
+              is_follow_up: formData.isFollowUp, // Updated field
+              is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
+              updated_by: "1" // You might want to get this from user context
+            };
+            console.log("=== STEP 2: CALL LOG UPDATE API REQUEST ===");
+            console.log("17. Step 2 API Details:", callLogUpdateRequestBody);
+            // Call the second API to update call log with follow-up information
+            const callLogUpdateResponse = await fetch(`${apiBase}/call-log/update`, {
+              method: "PUT",
+              headers,
+              body: JSON.stringify(callLogUpdateRequestBody),
+            });
+            console.log("📡 API CALL 2 COMPLETED");
+            console.log("18. Step 2 API Response Status:", callLogUpdateResponse.status, callLogUpdateResponse.statusText);
+            if (!callLogUpdateResponse.ok) {
+              await callLogUpdateResponse.json().catch(() => ({}));
+              // Don't throw error here, as the call log detail was already created successfully
+            } else {
+              await callLogUpdateResponse.json();
+            }
+          }
+        }
+      }
       
-      setShowQuickCallModal(false);
-      resetForm();
-      setShowSuccessModal(true);
+      console.log("=== END QUICK CALL SAVE DEBUG ===");
+  // ...
+      
+  setShowQuickCallModal(false);
+  resetForm();
+  setShowSuccessModal(true);
       
     } catch (error) {
-      console.error("Error saving quick call log:", error);
-      alert(`Failed to save quick call log: ${error instanceof Error ? error.message : 'Unknown error'}`);
+  alert(`Failed to save quick call log: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
+  // Success Modal OK handler for both Quick Call and Quick Site Visit
+  const handleSuccessOk = () => {
+    setShowSuccessModal(false);
+    // Always navigate to /callpipeline to ensure refresh
+    // Force a hard reload to /callpipeline to ensure the page is fully refreshed
+    if (typeof window !== 'undefined') {
+      window.location.replace('/callpipeline');
+    } else if (router && typeof router.replace === 'function') {
+      router.replace('/callpipeline');
+    }
+  };
   // Site Visit Form Handlers
-  const handleSiteVisitChange = (field: keyof typeof siteVisitFormData, value: string | SelectOption | null) => {
+  const handleSiteVisitChange = (
+    field: keyof typeof siteVisitFormData,
+    value: string | SelectOption | null | boolean | Date
+  ) => {
     setSiteVisitFormData((prev) => ({ ...prev, [field]: value }));
     if (siteVisitErrors[field]) {
       setSiteVisitErrors(prevErrors => {
@@ -872,13 +898,11 @@ export default function CallLogsTable({
 
   const validateSiteVisit = () => {
     const newErrors: typeof siteVisitErrors = {};
-    
     if (!siteVisitFormData.visitDate) newErrors.visitDate = "Visit date is required.";
     if (!siteVisitFormData.visitStartTime) newErrors.visitStartTime = "Start time is required.";
     if (!siteVisitFormData.contactResult) newErrors.contactResult = "Contact result is required.";
-    if (!siteVisitFormData.purpose.trim()) newErrors.purpose = "Purpose is required.";
-    if (!siteVisitFormData.notes.trim()) newErrors.notes = "Notes/Remarks are required.";
-    
+  // Purpose validation removed as input is not shown
+  if (!siteVisitFormData.notes.trim()) newErrors.notes = "Notes/Remarks are required.";
     // Validate end time is after start time if both are provided
     if (siteVisitFormData.visitStartTime && siteVisitFormData.visitEndTime) {
       const startTime = new Date(`2000-01-01T${siteVisitFormData.visitStartTime}`);
@@ -887,7 +911,9 @@ export default function CallLogsTable({
         newErrors.visitEndTime = "End time must be after start time.";
       }
     }
-    
+    if (siteVisitFormData.is_follow_up && !siteVisitFormData.follow_up_date) {
+      newErrors.follow_up_date = "Follow-up date is required if follow-up is needed.";
+    }
     setSiteVisitErrors(newErrors);
     return Object.keys(newErrors).length === 0;
   };
@@ -898,8 +924,10 @@ export default function CallLogsTable({
       visitStartTime: "",
       visitEndTime: "",
       contactResult: null,
-      purpose: "",
+      purpose: "", // keep for type safety, not used in UI
       notes: "",
+      is_follow_up: false,
+      follow_up_date: null,
     });
     setSiteVisitPhotos([]);
     setSiteVisitErrors({});
@@ -932,112 +960,116 @@ export default function CallLogsTable({
     return uploadData.photoUrl || uploadData.url || '';
   };
 
-  const handleSiteVisitSave = async () => { 
+  const handleSiteVisitSave = async () => {
     if (!validateSiteVisit() || !pipelineInfo) return;
-    
     try {
       setIsSubmitting(true);
-      
       // Upload photos first (following site visit create pattern)
       const photoUrls: string[] = [];
       if (siteVisitPhotos.length > 0) {
-        console.log("Uploading site visit photos:", siteVisitPhotos.length);
         try {
-          // First, create a temporary site visit ID for photo uploads
           const tempSiteVisitId = `SV-${Date.now()}`;
-          
-          // Upload photos one by one following lead edit pattern
           for (const photoFile of siteVisitPhotos) {
             if (photoFile.file) {
-              console.log(`Uploading photo: ${photoFile.name}`);
               const uploadedUrl = await uploadSiteVisitPhotoToStorage(photoFile.file, tempSiteVisitId);
               photoUrls.push(uploadedUrl);
-              console.log("Successfully uploaded photo, URL:", uploadedUrl);
             }
           }
-          console.log('Final photo URLs array:', photoUrls);
         } catch (error) {
-          console.error("Error uploading photos:", error);
           const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
           alert(`Error uploading photos: ${errorMessage}`);
           setIsSubmitting(false);
           return;
         }
       }
-      
       // Format datetime strings for API
       const startDatetime = `${siteVisitFormData.visitDate} ${siteVisitFormData.visitStartTime}:00`;
-      const endDatetime = siteVisitFormData.visitEndTime 
+      const endDatetime = siteVisitFormData.visitEndTime
         ? `${siteVisitFormData.visitDate} ${siteVisitFormData.visitEndTime}:00`
         : "";
-      
-      // Prepare API request body
+      // Prepare API request body (purpose is handled at parent, not here)
+      // Use purpose from selectedCallLog if available, fallback to default
       const apiRequestBody = {
         call_id: pipelineInfo.pipelineId,
         property_profile_id: String(pipelineInfo.propertyProfileId),
         staff_id: String(pipelineInfo.callerId || "000001"),
         lead_id: pipelineInfo.leadId,
         contact_result_id: siteVisitFormData.contactResult?.value || "1",
-        purpose: siteVisitFormData.purpose,
+        purpose: (selectedCallLog && selectedCallLog.purpose) ? selectedCallLog.purpose : "Site visit scheduled.",
         start_datetime: startDatetime,
         end_datetime: endDatetime,
         photo_url: photoUrls,
         remark: siteVisitFormData.notes
       };
-      
-      console.log("Quick Site Visit Data to submit:");
-      console.log("- photo_url array:", apiRequestBody.photo_url);
-      console.log("- photo_url length:", apiRequestBody.photo_url.length);
-      console.log("Full apiRequestBody:", apiRequestBody);
-      
+      console.log('[Quick Site Visit] POST /site-visit/create body:', apiRequestBody);
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      
       const response = await fetch(`${apiBase}/site-visit/create`, {
         method: "POST",
         headers,
         body: JSON.stringify(apiRequestBody),
       });
-      
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `API request failed with status ${response.status}`);
       }
-      
-      const responseData = await response.json();
-      console.log("Quick Site Visit API Response:", responseData);
-      
-      setShowQuickSiteVisitModal(false);
-      resetSiteVisitForm();
-      setShowSuccessModal(true);
-      
+      // After successful site visit creation, update call log follow-up info
+      // Only send follow-up fields if is_follow_up is true
+      if (siteVisitFormData.is_follow_up) {
+        // Fetch current call log data to preserve details
+        const getCurrentCallLogResponse = await fetch(`${apiBase}/call-log/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            page_number: "1",
+            page_size: "10",
+            search_type: "call_log_id",
+            query_search: pipelineInfo.pipelineId,
+          }),
+        });
+        if (getCurrentCallLogResponse.ok) {
+          const currentCallLogData = await getCurrentCallLogResponse.json();
+          if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
+            const currentLog = currentCallLogData[0].data[0];
+            // Prepare the call log update request with the expected structure (no call log detail fetch)
+            const callLogUpdateRequestBody = {
+              call_log_id: pipelineInfo.pipelineId,
+              lead_id: currentLog.lead_id,
+              property_profile_id: String(currentLog.property_profile_id),
+              status_id: String(currentLog.status_id || "1"),
+              purpose: currentLog.purpose || "Call pipeline management",
+              fail_reason: currentLog.fail_reason || null,
+              follow_up_date: siteVisitFormData.follow_up_date
+                ? `${siteVisitFormData.follow_up_date.getFullYear()}-${String(siteVisitFormData.follow_up_date.getMonth() + 1).padStart(2, '0')}-${String(siteVisitFormData.follow_up_date.getDate()).padStart(2, '0')}`
+                : null,
+              is_follow_up: siteVisitFormData.is_follow_up,
+              is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
+              updated_by: "1"
+            };
+            console.log('[Quick Site Visit] PUT /call-log/update-info body:', callLogUpdateRequestBody);
+            await fetch(`${apiBase}/call-log/update-info`, {
+              method: "PUT",
+              headers,
+              body: JSON.stringify(callLogUpdateRequestBody),
+            });
+          }
+        }
+      }
+  setShowQuickSiteVisitModal(false);
+  resetSiteVisitForm();
+  setShowSuccessModal(true);
     } catch (error) {
-      console.error("Error saving quick site visit:", error);
       alert(`Failed to save quick site visit: ${error instanceof Error ? error.message : 'Unknown error'}`);
     } finally {
       setIsSubmitting(false);
     }
   };
 
-  const handleAddAnother = () => {
-    setShowSuccessModal(false);
-    resetForm();
-    if (selectedCallLog) {
-      setShowQuickCallModal(true);
-    }
-  };
-
-  const handleViewHistory = () => {
-    setShowSuccessModal(false);
-    if (pipelineInfo) {
-      router.push(`/callpipeline/quickcall?pipelineId=${pipelineInfo.pipelineId}`);
-    }
-  };
+  // (Removed unused handleAddAnother and handleViewHistory for cleanup)
   const handleActionSelect = (action: 'view' | 'edit' | 'delete' | 'quickCall' | 'quickSiteVisit' | 'siteVisit' | 'viewCallHistory' | 'loanPaymentSchedule', callLog: CallLog) => {
-    console.log('Action selected:', action, 'CallLog:', callLog);
-    console.log('Call Log ID:', callLog.call_log_id);
+  // ...
     
     if (action === 'view') {
       if (!callLog.call_log_id) {
@@ -1091,9 +1123,9 @@ export default function CallLogsTable({
               <TableHeader className="border-b border-gray-100 dark:border-white/[0.05]">
                 <TableRow>
                   {callLogColumnConfig.filter(col => visibleColumns.includes(col.key)).map(col => (
-                    <TableCell key={col.key} isHeader className="px-5 py-3 text-left font-medium text-gray-500 text-theme-xs dark:text-gray-400">{col.label}</TableCell>
+                    <TableCell key={col.key} isHeader className="px-5 py-2 text-left font-medium text-gray-500 text-theme-xs dark:text-gray-400">{col.label}</TableCell>
                   ))}
-                  <TableCell isHeader className="px-5 py-3 text-center"><span className="font-medium text-gray-500 text-theme-xs dark:text-gray-400">Actions</span></TableCell>
+                  <TableCell isHeader className="px-5 py-2 text-center"><span className="font-medium text-gray-500 text-theme-xs dark:text-gray-400">Actions</span></TableCell>
                 </TableRow>
               </TableHeader>
               <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
@@ -1193,12 +1225,12 @@ export default function CallLogsTable({
                       }
                       
                       return (
-                        <TableCell key={`${callLog.call_log_id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                        <TableCell key={`${callLog.call_log_id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                           {typeof displayValue === 'string' || typeof displayValue === 'number' ? displayValue : displayValue || '-'}
                         </TableCell>
                       );
                     })}
-                    <TableCell className="px-5 py-4">
+                    <TableCell className="px-5 py-3">
                       <div className="flex items-center justify-center gap-2">
                         <PrimaryActionsMenu callLog={callLog} onSelect={handleActionSelect} />
                         <HistoryActionsMenu callLog={callLog} onSelect={handleActionSelect} />
@@ -1347,7 +1379,7 @@ export default function CallLogsTable({
 
                 {/* Call Status */}
                 <div>
-                  <Label htmlFor="quickCallStatus">Call Status *</Label>
+                  <Label htmlFor="quickCallStatus">Call Result Status *</Label>
                   <Select
                     placeholder="Select status"
                     options={statusOptions}
@@ -1473,7 +1505,7 @@ export default function CallLogsTable({
       {/* Success Modal */}
       <Modal 
         isOpen={showSuccessModal} 
-        onClose={() => setShowSuccessModal(false)}
+        onClose={handleSuccessOk}
         className="max-w-md p-6"
       >
         <div className="text-center">
@@ -1482,29 +1514,19 @@ export default function CallLogsTable({
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
             </svg>
           </div>
-          
           <h3 className="mb-2 text-lg font-semibold text-gray-800 dark:text-white">
-            Call Log Saved Successfully!
+            Success!
           </h3>
-          
           <p className="mb-6 text-sm text-gray-500 dark:text-gray-400">
-            The call log has been added to the pipeline. What would you like to do next?
+            The action was completed successfully. Click OK to refresh and see the latest info.
           </p>
-          
           <div className="flex flex-col gap-3 sm:flex-row sm:gap-3">
             <Button
-              variant="outline"
-              onClick={handleAddAnother}
-              className="flex-1"
-            >
-              Add Another Call
-            </Button>
-            <Button
               variant="primary"
-              onClick={handleViewHistory}
+              onClick={handleSuccessOk}
               className="flex-1"
             >
-              View Call History
+              OK
             </Button>
           </div>
         </div>
@@ -1631,7 +1653,7 @@ export default function CallLogsTable({
 
                 {/* Contact Result */}
                 <div>
-                  <Label htmlFor="quickSiteVisitContactResult">Contact Result *</Label>
+                  <Label htmlFor="quickSiteVisitContactResult">Site Visit Result *</Label>
                   <Select
                     options={statusOptions}
                     value={siteVisitFormData.contactResult}
@@ -1642,19 +1664,52 @@ export default function CallLogsTable({
                 </div>
               </div>
 
-              {/* Purpose */}
+
+              {/* Purpose input removed as per requirements. Purpose is handled at parent level. */}
+
+              {/* Follow-up Section */}
               <div>
-                <Label htmlFor="quickSiteVisitPurpose">Purpose *</Label>
-                <InputField
-                  type="text"
-                  id="quickSiteVisitPurpose"
-                  value={siteVisitFormData.purpose}
-                  onChange={(e) => handleSiteVisitChange('purpose', e.target.value)}
-                  placeholder="Enter the purpose of the site visit"
-                  error={!!siteVisitErrors.purpose}
-                />
-                {siteVisitErrors.purpose && <p className="text-sm text-red-500 mt-1">{siteVisitErrors.purpose}</p>}
+                <Label htmlFor="quickSiteVisitFollowUpToggle">Follow-up Required</Label>
+                <span>
+                  <div className="flex items-center">
+                    <label className="inline-flex items-center cursor-pointer">
+                      <input
+                        type="checkbox"
+                        id="quickSiteVisitFollowUpToggle"
+                        checked={siteVisitFormData.is_follow_up}
+                        onChange={(e) => handleSiteVisitChange('is_follow_up', e.target.checked)}
+                        className="sr-only"
+                      />
+                      <div className={`relative w-11 h-6 rounded-full transition-colors duration-200 ease-in-out ${
+                        siteVisitFormData.is_follow_up ? 'bg-brand-500' : 'bg-gray-200 dark:bg-gray-700'
+                      }`}>
+                        <div className={`absolute left-1 top-1 bg-white w-4 h-4 rounded-full transition-transform duration-200 ease-in-out ${
+                          siteVisitFormData.is_follow_up ? 'transform translate-x-5' : ''
+                        }`}></div>
+                      </div>
+                    </label>
+                  </div>
+                  {siteVisitErrors.is_follow_up && <p className="text-sm text-red-500 mt-1">{siteVisitErrors.is_follow_up}</p>}
+                </span>
               </div>
+
+              {/* Follow-up Date - Show when toggle is on */}
+              {siteVisitFormData.is_follow_up && (
+                <div>
+                  <DatePicker
+                    id="quick-site-visit-follow-up-date-picker"
+                    label="Follow-up Date *"
+                    placeholder="Select follow-up date"
+                    defaultDate={siteVisitFormData.follow_up_date || undefined}
+                    onChange={(selectedDates) => {
+                      if (selectedDates && selectedDates.length > 0) {
+                        handleSiteVisitChange('follow_up_date', selectedDates[0]);
+                      }
+                    }}
+                  />
+                  {siteVisitErrors.follow_up_date && <p className="text-sm text-red-500 mt-1">{siteVisitErrors.follow_up_date}</p>}
+                </div>
+              )}
 
               {/* Notes/Remarks */}
               <div>

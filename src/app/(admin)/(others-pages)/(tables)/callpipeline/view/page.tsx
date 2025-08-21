@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 import { useRouter } from "next/navigation";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
 import ComponentCard from "@/components/common/ComponentCard";
@@ -369,14 +370,7 @@ export default function ViewCallPipelinePage() {
   };
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="text-center">
-          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-brand-500 mx-auto mb-4"></div>
-          <p className="text-gray-500 dark:text-gray-400">Loading pipeline information...</p>
-        </div>
-      </div>
-    );
+    return <LoadingOverlay isLoading={true} />;
   }
 
   if (pipelineNotFound || !pipelineInfo) {

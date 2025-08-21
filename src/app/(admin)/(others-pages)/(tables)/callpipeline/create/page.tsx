@@ -1,3 +1,4 @@
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 "use client";
 import React, { useState } from "react";
 import { useRouter } from "next/navigation";
@@ -345,11 +346,13 @@ export default function CallPipelineCreateForm() {
         photo_url: null,
         contact_data: [
           {
-            channel_type_id: "2", // Updated to 2 as requested
+            channel_type_id: "3", // Should be 3
             contact_values: [
               {
                 user_name: `${firstName} ${lastName}`.trim(), // Use full name as requested
-                contact_number: newLeadData.phoneNumber,
+                contact_number: newLeadData.phoneNumber.startsWith("+855") 
+                  ? newLeadData.phoneNumber.slice(4) // Remove +855 prefix to get raw digits like 012512512
+                  : newLeadData.phoneNumber.replace(/\D/g, ""), // Remove all non-digits as fallback
                 remark: "Primary contact",
                 is_primary: true,
               }

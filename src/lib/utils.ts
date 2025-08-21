@@ -58,16 +58,22 @@ export const formatDateForAPI = (date: Date | string | null | undefined): string
     }
 };
 
-export const getUserFromToken = (): { staff_id: string } | null => {
+export const getUserFromToken = (): { userid: string } | null => {
     if (typeof window === 'undefined') return null;
-    
     try {
         const token = localStorage.getItem('token');
-        if (!token) return null;
-        
+        if (!token) {
+            console.debug('[getUserFromToken] No token found in localStorage.');
+            return null;
+        }
         const payload = JSON.parse(atob(token.split('.')[1]));
-        return { staff_id: payload.staff_id };
-    } catch {
+        console.debug('[getUserFromToken] Decoded token payload:', payload);
+        if (!payload.user_id) {
+            console.debug('[getUserFromToken] userid not found in token payload.');
+        }
+        return { userid: payload.user_id };
+    } catch (err) {
+        console.error('[getUserFromToken] Error decoding token:', err);
         return null;
     }
 };

@@ -41,7 +41,6 @@ export default function CreateStaffPage() {
     lastName: "",
     gender: null as SelectOption | null,
     dob: null as Date | null,
-    email: "",
     staffCode: "",
     position: "",
     department: null as SelectOption | null,
@@ -166,9 +165,6 @@ export default function CreateStaffPage() {
     if (!formData.employmentStartDate) newErrors.employmentStartDate = "Employment start date is required.";
     
     // Email validation
-    if (formData.email && !/\S+@\S+\.\S+/.test(formData.email)) {
-      newErrors.email = "Please enter a valid email address.";
-    }
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
@@ -300,6 +296,7 @@ export default function CreateStaffPage() {
       )}
       <div>
         <PageBreadcrumb crumbs={breadcrumbs} />
+      <LoadingOverlay isLoading={isSaving} />
         <div className="space-y-6">
           <ComponentCard title="Create New Staff Member">
             <div className="relative">
@@ -389,16 +386,6 @@ export default function CreateStaffPage() {
                       {errors.dob && <p className="text-sm text-red-500 mt-1">{errors.dob}</p>}
                     </div>
 
-                    <div className="col-span-2 lg:col-span-1">
-                      <Label>Email</Label>
-                      <Input
-                        type="email"
-                        placeholder="Enter email address"
-                        value={formData.email}
-                        onChange={(e) => handleChange("email", e.target.value)}
-                      />
-                      {errors.email && <p className="text-sm text-red-500 mt-1">{errors.email}</p>}
-                    </div>
                   </div>
                 </div>
 

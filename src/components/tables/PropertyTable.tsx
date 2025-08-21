@@ -18,6 +18,10 @@ interface ApiPropertyData {
   property_profile_id: number;
   property_profile_name: string;
   address: string;
+  province_name: string;
+  commune_name: string;
+  district_name: string;
+  village_name: string;
   project_name: string;
   property_type_name: string;
   property_status_name: string;
@@ -25,6 +29,7 @@ interface ApiPropertyData {
   home_number: string;
   width: number;
   length: number;
+  photo_url?: string[];
   is_active: boolean;
   created_by: string;
   created_date: string;
@@ -47,6 +52,7 @@ export interface Property {
   width: number;
   length: number;
   price: number;
+  photoCount: number;
   is_active: boolean;
   created_by: string;
   created_date: string;
@@ -70,6 +76,7 @@ export const propertyColumnConfig: { key: keyof Property; label: string }[] = [
   { key: 'width', label: 'Width' },
   { key: 'length', label: 'Length' },
   { key: 'price', label: 'Price' },
+  { key: 'photoCount', label: 'Photos' },
   { key: 'is_active', label: 'Active' },
   { key: 'created_by', label: 'Created By' },
   { key: 'created_date', label: 'Created Date' },
@@ -144,7 +151,7 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
           const formattedProperties: Property[] = apiResult.data.map((property: ApiPropertyData & { price?: number }) => ({
             id: property.property_profile_id,
             name: property.property_profile_name,
-            address: property.address,
+            address: [property.province_name, property.commune_name].filter(Boolean).join(', '),
             project: property.project_name,
             type: property.property_type_name,
             status: property.property_status_name || 'Unknown',
@@ -153,6 +160,7 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
             width: property.width,
             length: property.length,
             price: property.price ?? 0,
+            photoCount: property.photo_url ? property.photo_url.filter(url => url && url.trim() !== '').length : 0,
             is_active: property.is_active,
             created_by: property.created_by,
             created_date: property.created_date,
@@ -180,7 +188,7 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
   }, [currentPage, searchTerm]);
 
   const totalPages = Math.ceil(totalRows / pageLimit);
-  const columnsToShow: (keyof Property)[] = visibleColumns || ['id', 'name', 'address', 'project', 'type', 'status', 'room', 'home', 'width', 'length'];
+  const columnsToShow: (keyof Property)[] = visibleColumns || ['id', 'name', 'address', 'project', 'type', 'status', 'photoCount', 'room', 'home', 'width', 'length'];
 
   const getStatusBadge = (status: string) => {
     const baseClasses = "inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium";
@@ -291,12 +299,12 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                       <TableCell
                         key={column.key}
                         isHeader
-                        className="px-5 py-3 text-left font-medium text-gray-500 text-theme-xs dark:text-gray-400"
+                        className="px-5 py-2 text-left font-medium text-gray-500 text-theme-xs dark:text-gray-400"
                       >
                         {column.label}
                       </TableCell>
                   ))}
-                  <TableCell isHeader className="px-5 py-3 text-center">
+                  <TableCell isHeader className="px-5 py-2 text-center">
                     <span className="font-medium text-gray-500 text-theme-xs dark:text-gray-400">
                       Actions
                     </span>
@@ -318,7 +326,7 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                         // Format specific columns with subtle emphasis
                         if (column.key === 'name' && typeof value === 'string') {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               <HighlightedCell className="text-gray-900 dark:text-white">
                                 {value}
                               </HighlightedCell>
@@ -326,7 +334,7 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                           );
                         } else if (column.key === 'room' && value) {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               <HighlightedCell className="text-gray-800 dark:text-gray-200">
                                 {String(value)}
                               </HighlightedCell>
@@ -334,7 +342,7 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                           );
                         } else if (column.key === 'width' && typeof value === 'number') {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               <HighlightedCell className="text-gray-800 dark:text-gray-200">
                                 {value}m
                               </HighlightedCell>
@@ -342,7 +350,7 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                           );
                         } else if (column.key === 'length' && typeof value === 'number') {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               <HighlightedCell className="text-gray-800 dark:text-gray-200">
                                 {value}m
                               </HighlightedCell>
@@ -350,15 +358,26 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                           );
                         } else if (column.key === 'price' && typeof value === 'number') {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               <HighlightedCell className="text-green-600 dark:text-green-400 font-semibold">
                                 {formatPrice(value)}
                               </HighlightedCell>
                             </TableCell>
                           );
+                        } else if (column.key === 'photoCount' && typeof value === 'number') {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
+                              <div className="flex items-center text-sm text-gray-600 dark:text-gray-300">
+                                <svg className="w-4 h-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16l4.586-4.586a2 2 0 012.828 0L16 16m-2-2l1.586-1.586a2 2 0 012.828 0L20 14m-6-6h.01M6 20h12a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v12a2 2 0 002 2z" />
+                                </svg>
+                                <span className="font-medium">{value}</span>
+                              </div>
+                            </TableCell>
+                          );
                         } else if (column.key === 'status' && typeof value === 'string') {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               <span className={getStatusBadge(value)}>
                                 {value}
                               </span>
@@ -366,13 +385,13 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                           );
                         } else if (column.key === 'created_date' || column.key === 'last_update') {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               {formatDateTime(value as string)}
                             </TableCell>
                           );
                         } else if (column.key === 'is_active') {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               <span className={value ? 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400' : 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400'}>
                                 {value ? 'Active' : 'Inactive'}
                               </span>
@@ -380,13 +399,13 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                           );
                         } else {
                           return (
-                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-4 text-gray-800 text-theme-sm dark:text-white/90">
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               {typeof value === 'string' || typeof value === 'number' ? value : '-'}
                             </TableCell>
                           );
                         }
                       })}
-                    <TableCell className="px-5 py-4">
+                    <TableCell className="px-5 py-3">
                       <div className="flex items-center justify-center">
                         <ActionMenu property={property} onSelect={handleActionSelect} />
                       </div>

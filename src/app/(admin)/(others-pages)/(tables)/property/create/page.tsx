@@ -60,6 +60,7 @@ interface FormErrors {
 export default function CreatePropertyPage() {
   const router = useRouter();
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [errorModal, setErrorModal] = useState<{ open: boolean; statusCode?: number; message?: string }>({ open: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
   
   const [formData, setFormData] = useState<FormData>({
@@ -327,7 +328,7 @@ export default function CreatePropertyPage() {
         property_profile_name: String(formData.PropertyName || ""),
         home_number: String(formData.Location.homeAddress || ""),
         room_number: String(formData.Location.homeAddress || ""), // Use same as home_number for now
-        address: String(formData.Location.province?.label + " " + formData.Location.district?.label + " " + formData.Location.commune?.label).trim() || String(formData.Location.homeAddress || ""),
+        address: String(formData.Location.streetAddress || ""), 
         width: String(formData.Width || ""),
         length: String(formData.Length || ""),
         price: String(formData.Price || ""),
@@ -662,9 +663,17 @@ export default function CreatePropertyPage() {
       <SuccessModal
         isOpen={showSuccessModal}
         onClose={handleSuccessModalClose}
-        title="Property Profile Created!"
+        statusCode={200}
         message="The property profile has been successfully added to the system."
-        confirmButtonText="Back to Property List"
+        buttonText="Back to Property List"
+      />
+      {/* Error Modal */}
+      <SuccessModal
+        isOpen={errorModal.open}
+        onClose={() => setErrorModal({ open: false })}
+        statusCode={errorModal.statusCode}
+        message={errorModal.message}
+        buttonText="Okay, Got It"
       />
     </div>
   );

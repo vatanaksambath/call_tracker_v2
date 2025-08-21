@@ -636,7 +636,7 @@ export default function ContactInfo({ value, onChange, error }: ContactInfoProps
                                                             contact={contact}
                                                             valueIndex={valueIndex}
                                                             channelType={localContacts[activeTab].channel_type}
-                                                            canRemove={localContacts[activeTab].contact_values.length > 1}
+                                                            canRemove={true}
                                                             onValueChange={(field, value) => handleValueChange(activeTab, valueIndex, field, value)}
                                                             onSetPrimary={() => setAsPrimary(activeTab, valueIndex)}
                                                             onRemove={() => removeContactValue(activeTab, valueIndex)}

@@ -1,50 +1,49 @@
 
 "use client";
 import Image from "next/image";
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import { Dropdown } from "../ui/dropdown/Dropdown";
 import { DropdownItem } from "../ui/dropdown/DropdownItem";
 import { useRouter } from "next/navigation";
-import { jwtDecode } from 'jwt-decode';
+import { useAuth } from "@/hooks/useAuth";
 
-interface DecodedToken {
-  user_id: string;    
-  user_name: string; 
-  user_email: string; 
-  iat: number;    
-  exp: number;    
+interface UserDisplayInfo {
+  user_name?: string;
+  user_position?: string;
+  gender?: string;
 }
 
 export default function UserDropdown() {
   const [isOpen, setIsOpen] = useState(false);
   const router = useRouter();
+  const { logout, user: authUser } = useAuth();
 
-  const [user, setUser] = useState<DecodedToken | null>(null);
-
-  useEffect(() => {
-    const storedToken = localStorage.getItem('token');
-
-    if (storedToken) {
-      try {
-        const decoded = jwtDecode<DecodedToken>(storedToken);
-        
-        if (decoded.exp && decoded.exp * 1000 < Date.now()) {
-          console.log("Token expired. Logging out automatically.");
-          localStorage.removeItem('token');
-          setUser(null);
-          setUser(null);
-          router.push('/signin');
-        } else {
-          setUser(decoded);
-        }
-      } catch (error) {
-        console.error("Failed to decode token or token is invalid:", error);
-        localStorage.removeItem('token');
-        setUser(null);
-        router.push('/signin');
+  // Initialize user from localStorage on mount or use auth user
+  let initialUser: UserDisplayInfo | null = null;
+  try {
+    if (authUser) {
+      // Use authenticated user data if available
+      initialUser = {
+        user_name: authUser.user_name,
+        user_position: 'User', // Default position if not available
+        gender: 'Male', // Default gender if not available
+      };
+    } else {
+      // Fallback to localStorage for additional user info
+      const staffStr = typeof window !== 'undefined' ? localStorage.getItem('staff') : null;
+      if (staffStr) {
+        const staff = JSON.parse(staffStr);
+        initialUser = {
+          user_name: [staff.first_name, staff.last_name].filter(Boolean).join(' '),
+          user_position: staff.position,
+          gender: staff.gender_name || staff.gender,
+        };
       }
     }
-  }, [router]);
+  } catch {
+    initialUser = null;
+  }
+  const [user] = useState<UserDisplayInfo | null>(initialUser);
 
   function toggleDropdown(e: React.MouseEvent<HTMLButtonElement, MouseEvent>) {
     e.stopPropagation();
@@ -57,9 +56,24 @@ export default function UserDropdown() {
 
   const handleSignOut = () => {
     closeDropdown();
-    localStorage.removeItem('token');
-    setUser(null);
-    router.push('/signin');
+    logout(); // Use centralized logout function
+  };
+
+  const handleEditProfile = () => {
+    closeDropdown();
+    setTimeout(() => {
+      const staffStr = localStorage.getItem('staff');
+      if (staffStr) {
+        try {
+          const staff = JSON.parse(staffStr);
+          if (staff.staff_id) {
+            router.push(`/staff/edit/${staff.staff_id}`);
+          }
+        } catch {
+          // fallback: do nothing
+        }
+      }
+    }, 100);
   };
 
   return (
@@ -72,7 +86,7 @@ export default function UserDropdown() {
           <Image
             width={44}
             height={44}
-            src={"/images/user/owner.jpg"}
+            src={user?.gender === 'Female' ? '/images/user/female-head.svg' : '/images/user/male-head.svg'}
             alt={user?.user_name || "User Profile"} 
           />
         </span>
@@ -80,6 +94,7 @@ export default function UserDropdown() {
         <span className="block mr-1 font-medium text-theme-sm">
           {user?.user_name}
         </span>
+
 
         <svg
           className={`stroke-gray-500 dark:stroke-gray-400 transition-transform duration-200 ${
@@ -110,17 +125,18 @@ export default function UserDropdown() {
           <span className="block font-medium text-gray-700 text-theme-sm dark:text-gray-400">
             {user?.user_name || 'Guest User'}
           </span>
-          <span className="mt-0.5 block text-theme-xs text-gray-500 dark:text-gray-400">
-            {user?.user_email}
-          </span>
+          {user?.user_position && (
+            <span className="block text-theme-xs text-gray-500 dark:text-gray-400 mt-0.5">
+              {user.user_position}
+            </span>
+          )}
         </div>
 
         <ul className="flex flex-col gap-1 pt-4 pb-3 border-b border-gray-200 dark:border-gray-800">
           <li>
             <DropdownItem
-              onItemClick={closeDropdown}
-              tag="a"
-              href="/profile"
+              onItemClick={handleEditProfile}
+              tag="button"
               className="flex items-center gap-3 px-3 py-2 font-medium text-gray-700 rounded-lg group text-theme-sm hover:bg-gray-100 hover:text-gray-700 dark:text-gray-400 dark:hover:bg-white/5 dark:hover:text-gray-300"
             >
               <svg

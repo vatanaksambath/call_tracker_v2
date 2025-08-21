@@ -6,6 +6,7 @@ import ComponentCard from "@/components/common/ComponentCard";
 import Button from "@/components/ui/button/Button";
 import { Modal } from "@/components/ui/modal";
 import { UserCircleIcon } from "@heroicons/react/24/outline";
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 import api from "@/lib/api";
 import Image from "next/image";
 
@@ -182,19 +183,7 @@ export default function ViewLeadPage() {
   );
 
   if (isLoading) {
-    return (
-      <div>
-        <PageBreadcrumb crumbs={breadcrumbs} />
-        <ComponentCard title="Lead Details">
-          <div className="flex items-center justify-center h-64">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-500 mx-auto mb-4"></div>
-              <p className="text-gray-600 dark:text-gray-400">Loading lead...</p>
-            </div>
-          </div>
-        </ComponentCard>
-      </div>
-    );
+    return <LoadingOverlay isLoading={true} />;
   }
 
   if (leadNotFound || !lead) {

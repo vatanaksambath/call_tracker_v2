@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useEffect } from "react";
+import LoadingOverlay from "@/components/ui/loading/LoadingOverlay";
 import Image from "next/image";
 import { useRouter, useSearchParams } from "next/navigation";
 import PageBreadcrumb from "@/components/common/PageBreadCrumb";
@@ -215,19 +216,7 @@ export default function ViewPropertyPage() {
   };
 
   if (isLoading) {
-    return (
-      <div>
-        <PageBreadcrumb crumbs={breadcrumbs} />
-        <ComponentCard title="Property Details">
-          <div className="flex items-center justify-center h-64">
-            <div className="text-center">
-              <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-500 mx-auto mb-4"></div>
-              <p className="text-gray-600 dark:text-gray-400">Loading property...</p>
-            </div>
-          </div>
-        </ComponentCard>
-      </div>
-    );
+    return <LoadingOverlay isLoading={true} />;
   }
 
   if (propertyNotFound || !property) {
@@ -432,7 +421,7 @@ export default function ViewPropertyPage() {
                                 className="max-h-full max-w-full object-contain"
                                 onError={(e) => {
                                   const target = e.target as HTMLImageElement;
-                                  target.src = '/images/placeholder-image.png';
+                                  target.style.display = 'none';
                                 }}
                                 unoptimized={true}
                               />
@@ -547,7 +536,7 @@ export default function ViewPropertyPage() {
                   className="w-full h-auto max-h-[60vh] object-contain mx-auto block"
                   onError={(e) => {
                     const target = e.target as HTMLImageElement;
-                    target.src = '/images/placeholder-image.png';
+                    target.style.display = 'none';
                   }}
                   unoptimized={true}
                 />
@@ -604,7 +593,7 @@ export default function ViewPropertyPage() {
                           className="w-full h-full object-cover"
                           onError={(e) => {
                             const target = e.target as HTMLImageElement;
-                            target.src = '/images/placeholder-image.png';
+                            target.style.display = 'none';
                           }}
                           unoptimized={true}
                         />

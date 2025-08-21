@@ -22,33 +22,37 @@ import LoadingOverlay from "../ui/loading/LoadingOverlay";
 import { useRouter } from "next/navigation";
 
 interface ApiStaffData {
-  staff_id: number;
-  staff_code: string;
-  first_name: string;
-  last_name: string;
-  gender_name: string;
-  email: string | null;
-  date_of_birth: string;
-  created_date: string;
-  created_by: string;
-  last_update: string;
-  updated_by: string;
-  position: string;
-  department: string | null;
-  employment_type: string;
-  employment_start_date: string;
-  employment_end_date: string | null;
-  employment_level: string | null;
-  current_address: string | null;
-  photo_url: string[] | null;
-  is_active: boolean;
-  contact_data: {
-      contact_values: {
-          contact_number: string;
-          is_primary: boolean;
-          remark: string;
-      }[];
-  }[];
+    staff_id: number;
+    staff_code: string;
+    first_name: string;
+    last_name: string;
+    gender_name: string;
+    email: string | null;
+    date_of_birth: string;
+    created_date: string;
+    created_by: string;
+    last_update: string;
+    updated_by: string;
+    position: string;
+    department: string | null;
+    employment_type: string;
+    employment_start_date: string;
+    employment_end_date: string | null;
+    employment_level: string | null;
+    current_address: string | null;
+    photo_url: string[] | null;
+    is_active: boolean;
+    contact_data: {
+            contact_values: {
+                    contact_number: string;
+                    is_primary: boolean;
+                    remark: string;
+            }[];
+    }[];
+    province_name?: string;
+    district_name?: string;
+    commune_name?: string;
+    village_name?: string;
 }
 
 export interface Staff {
@@ -85,6 +89,48 @@ const allColumns: { key: keyof Staff; label: string }[] = [
     { key: 'email', label: 'Email' },
     { key: 'status', label: 'Status' },
 ];
+
+// Phone number formatting function
+const formatPhoneNumber = (phone: string): string => {
+    if (!phone || phone === 'N/A') return phone;
+    
+    // Remove all non-digit characters
+    const digits = phone.replace(/\D/g, '');
+    
+    // Handle different cases
+    if (digits.length === 0) return phone;
+    
+    // If it starts with 855 (Cambodia country code)
+    if (digits.startsWith('855')) {
+        if (digits.length === 12) {
+            // Format: 855XXXXXXXXX -> (+855) XXX-XXX-XXXX
+            return `(+855) ${digits.slice(3, 6)}-${digits.slice(6, 9)}-${digits.slice(9)}`;
+        }
+    }
+    
+    // If it starts with 0 (local format)
+    if (digits.startsWith('0')) {
+        if (digits.length === 10) {
+            // Format: 0XXXXXXXXX -> (+855) XXX-XXX-XXXX
+            return `(+855) ${digits.slice(1, 4)}-${digits.slice(4, 7)}-${digits.slice(7)}`;
+        }
+    }
+    
+    // If it's 9 digits (without country code or leading 0)
+    if (digits.length === 9) {
+        // Format: XXXXXXXXX -> (+855) XXX-XXX-XXX
+        return `(+855) ${digits.slice(0, 3)}-${digits.slice(3, 6)}-${digits.slice(6)}`;
+    }
+    
+    // If it's 8 digits
+    if (digits.length === 8) {
+        // Format: XXXXXXXX -> (+855) XX-XXX-XXX
+        return `(+855) ${digits.slice(0, 2)}-${digits.slice(2, 5)}-${digits.slice(5)}`;
+    }
+    
+    // For any other format, just return as is
+    return phone;
+};
 
 const ActionMenu = ({ staff, onSelect }: { staff: Staff; onSelect: (action: 'view' | 'edit' | 'delete', staff: Staff) => void; }) => {
     const [isOpen, setIsOpen] = useState(false);
@@ -410,6 +456,12 @@ const StaffTable: React.FC<StaffTableProps> = ({
                         {staffMember.status}
                     </Badge>
                 );
+            case 'phone':
+                return (
+                    <span className="text-gray-600 dark:text-gray-400">
+                        {formatPhoneNumber(String(staffMember[columnKey] || 'N/A'))}
+                    </span>
+                );
             default:
                 const value = staffMember[columnKey];
                 return <span className="text-gray-600 dark:text-gray-400">{typeof value === 'string' || typeof value === 'number' ? value : 'N/A'}</span>;
@@ -532,6 +584,7 @@ export const useStaffData = (currentPage: number, pageSize: number = 10, searchQ
                 if (apiResult && apiResult.data) {
                     const formattedStaff: Staff[] = apiResult.data.map((staffMember: unknown) => {
                         const member = staffMember as Record<string, unknown>;
+                        const staff = staffMember as ApiStaffData;
                         const contactData = member.contact_data as Array<Record<string, unknown>> | undefined;
                         const primaryContact = contactData?.flatMap((cd) => (cd.contact_values as Array<Record<string, unknown>>) || []).find((cv) => cv.is_primary);
 
@@ -541,10 +594,8 @@ export const useStaffData = (currentPage: number, pageSize: number = 10, searchQ
                             const firstName = memberData.first_name || memberData.firstName || memberData.fname || '';
                             const lastName = memberData.last_name || memberData.lastName || memberData.lname || '';
                             const fullName = memberData.full_name || memberData.fullName || memberData.name || `${firstName} ${lastName}`.trim();
-                            
                             // If we still don't have a name, try other possibilities
                             const finalName = fullName || member.staff_name || member.staffName || `Staff ${member.staff_id || member.id || ''}`;
-                            
                             console.log("useStaffData - Mapping staff member:", {
                                 staff_id: member.staff_id || member.id,
                                 first_name: firstName,
@@ -552,33 +603,31 @@ export const useStaffData = (currentPage: number, pageSize: number = 10, searchQ
                                 full_name: fullName,
                                 finalName: finalName
                             });
-                            
                             return finalName;
                         };
 
                         return {
-                            id: String(staffMember.staff_id || staffMember.id || ''),
-                            staffCode: staffMember.staff_code || staffMember.staffCode || staffMember.code || `STF-${staffMember.staff_id || staffMember.id || ''}`,
-                            fullName: mapStaffData(staffMember),
-                            avatar: staffMember.photo_url?.[0] || staffMember.photoUrl || staffMember.avatar || "/images/user/user-02.jpg",
-                            gender: staffMember.gender_name || staffMember.gender || 'N/A',
-                            phone: primaryContact?.contact_number || staffMember.phone || staffMember.phoneNumber || 'N/A',
-                            dob: staffMember.date_of_birth || staffMember.dateOfBirth || staffMember.dob || 'N/A',
-                            position: staffMember.position || staffMember.jobTitle || staffMember.title || 'N/A',
-                            department: staffMember.department || staffMember.dept || 'N/A',
-                            employment_type: staffMember.employment_type || staffMember.employmentType || staffMember.type || 'N/A',
-                            employment_start_date: staffMember.employment_start_date || staffMember.startDate || staffMember.hireDate || 'N/A',
-                            employment_end_date: staffMember.employment_end_date || staffMember.endDate || null,
-                            employment_level: staffMember.employment_level || staffMember.level || null,
-                            current_address: staffMember.current_address || staffMember.address || null,
-                            email: staffMember.email || primaryContact?.contact_number?.includes('@') ? primaryContact?.contact_number : 'N/A',
-                            status: staffMember.is_active !== undefined ? (staffMember.is_active ? 'Active' : 'Inactive') : 
-                                   staffMember.status === 'active' || staffMember.status === 'Active' ? 'Active' : 
-                                   staffMember.status === 'inactive' || staffMember.status === 'Inactive' ? 'Inactive' : 'Active',
-                            raw: staffMember,
+                            id: String((staff.staff_id ?? member.staff_id) || member.id || ''),
+                            staffCode: staff.staff_code || member.staffCode || member.code || `STF-${(staff.staff_id ?? member.staff_id) || member.id || ''}`,
+                            fullName: mapStaffData(member),
+                            avatar: staff.photo_url?.[0] || member.photoUrl || member.avatar || "/images/user/user-02.jpg",
+                            gender: staff.gender_name || member.gender || 'N/A',
+                            phone: primaryContact?.contact_number || member.phone || member.phoneNumber || 'N/A',
+                            dob: staff.date_of_birth || member.dateOfBirth || member.dob || 'N/A',
+                            position: staff.position || member.jobTitle || member.title || 'N/A',
+                            department: staff.department || member.dept || 'N/A',
+                            employment_type: staff.employment_type || member.employmentType || member.type || 'N/A',
+                            employment_start_date: staff.employment_start_date || member.startDate || member.hireDate || 'N/A',
+                            employment_end_date: staff.employment_end_date || member.endDate || null,
+                            employment_level: staff.employment_level || member.level || null,
+                            current_address: staff.current_address || member.address || null,
+                            email: staff.email || (typeof primaryContact?.contact_number === 'string' && primaryContact.contact_number.includes('@') ? primaryContact.contact_number : 'N/A'),
+                            status: staff.is_active !== undefined ? (staff.is_active ? 'Active' : 'Inactive') : 
+                                   member.status === 'active' || member.status === 'Active' ? 'Active' : 
+                                   member.status === 'inactive' || member.status === 'Inactive' ? 'Inactive' : 'Active',
+                            raw: staff,
                         };
                     });
-                    
                     setStaff(formattedStaff);
                     setTotalRows(apiResult.total_row || apiResult.total_rows || 0);
                 } else {

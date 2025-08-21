@@ -60,7 +60,7 @@ interface Staff {
   position: string;
   staffCode: string;
   address: string;
-  status: string;
+  status: 'Active' | 'Inactive';
   created_date: string;
   updated_date?: string;
   raw: ApiStaffData;
@@ -118,19 +118,18 @@ export default function ViewStaffPage() {
     }
 
     const fetchStaffData = async () => {
-      setIsLoading(true);
       try {
         const response = await api.post('/staff/pagination', {
           page_number: String('1'),
           page_size: String('10'),
-          search_type: 'staff_code',
+          search_type: 'staff_id',
           query_search: String(staffId)
         });
 
         const apiResult = response.data[0];
         if (apiResult && apiResult.data && apiResult.data.length > 0) {
           const staffData = apiResult.data[0];
-          const primaryContact = staffData.contact_data?.flatMap(cd => cd.contact_values).find(cv => cv.is_primary);
+          const primaryContact = staffData.contact_data?.flatMap((cd: { contact_values: { contact_number: string; is_primary: boolean }[] }) => cd.contact_values).find((cv: { contact_number: string; is_primary: boolean }) => cv.is_primary);
           const fullAddress = [
             staffData.current_address,
             staffData.village_name,

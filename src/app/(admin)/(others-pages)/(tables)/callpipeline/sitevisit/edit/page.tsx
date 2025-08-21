@@ -271,27 +271,44 @@ export default function EditSiteVisitPage() {
     setPhotos(newPhotos);
   };
 
-  // Upload single photo function (following lead edit pattern)
-  const uploadPhotoToStorage = async (photoFile: File): Promise<string> => {
+  // Upload multiple photos function (following property edit pattern)
+  const uploadMultiplePhotosToStorage = async (photoFiles: PhotoFile[]): Promise<string[]> => {
+    if (photoFiles.length === 0) {
+      return [];
+    }
+
     const photoFormData = new FormData();
-    photoFormData.append('photo', photoFile);
-    photoFormData.append('menu', 'site_visit');
-    photoFormData.append('photoId', String(siteVisitId));
     
-    const uploadResponse = await api.post('/files/upload-one-photo', photoFormData, {
-      headers: { 'Content-Type': 'multipart/form-data' },
+    // Append all photo files
+    photoFiles.forEach((photo) => {
+      if (photo.file) {
+        photoFormData.append('photo', photo.file);
+      }
     });
     
-    console.log('Upload response:', uploadResponse.data);
-    console.log('Extracted imageUrl:', uploadResponse.data.imageUrl);
-    
-    // Extract the imageUrl from the response
-    const imageUrl = uploadResponse.data.imageUrl;
-    if (!imageUrl) {
-      throw new Error('No imageUrl returned from upload response');
+    // Append menu and photoId once
+    photoFormData.append('menu', 'site_visit');
+    photoFormData.append('photoId', String(siteVisitId));
+
+    try {
+      const uploadResponse = await api.post('/files/upload-multiple-photos', photoFormData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+      });
+      
+      console.log('Multiple photos upload response:', uploadResponse.data);
+      
+      // Extract the imageUrls array from the response
+      const imageUrls = uploadResponse.data.imageUrls;
+      if (!imageUrls || !Array.isArray(imageUrls)) {
+        throw new Error('No imageUrls array returned from upload response');
+      }
+      
+      console.log('Extracted imageUrls:', imageUrls);
+      return imageUrls;
+    } catch (error) {
+      console.error('Error uploading multiple photos:', error);
+      throw error;
     }
-    
-    return imageUrl;
   };
 
   const validateForm = () => {
@@ -326,15 +343,8 @@ export default function EditSiteVisitPage() {
       const endDatetime = formData.visitEndTime ? `${formData.visitDate} ${formData.visitEndTime}` : '';
 
       // Prepare photo URLs - combine existing and new photos
-      const existingPhotos = photos.filter(photo => photo.isExisting).map(photo => {
-        // Remove proxy prefix from existing photos to get original URLs
-        const proxyPrefix = '/api/proxy-image?url=';
-        if (photo.preview.startsWith(proxyPrefix)) {
-          return decodeURIComponent(photo.preview.substring(proxyPrefix.length));
-        }
-        return photo.preview;
-      });
-      const newPhotoFiles = photos.filter(photo => !photo.isExisting && photo.file);
+      const existingPhotos = siteVisitData.photo_url || [];
+      const newPhotoFiles = photos.filter(photo => photo.file);
       
       console.log('Existing photos:', existingPhotos);
       console.log('New photo files to upload:', newPhotoFiles.length);
@@ -345,15 +355,10 @@ export default function EditSiteVisitPage() {
       if (newPhotoFiles.length > 0) {
         console.log("Uploading new photos:", newPhotoFiles.length);
         try {
-          // Upload photos one by one following lead edit pattern
-          for (const photoFile of newPhotoFiles) {
-            if (photoFile.file) {
-              console.log(`Uploading photo: ${photoFile.name}`);
-              const uploadedUrl = await uploadPhotoToStorage(photoFile.file);
-              photoUrls.push(uploadedUrl);
-              console.log("Successfully uploaded photo, URL:", uploadedUrl);
-            }
-          }
+          // Upload all new photos at once using the multiple photos endpoint
+          const uploadedUrls = await uploadMultiplePhotosToStorage(newPhotoFiles);
+          photoUrls.push(...uploadedUrls);
+          console.log("Successfully uploaded photos, URLs:", uploadedUrls);
           console.log('Final photo URLs array:', photoUrls);
         } catch (uploadError) {
           console.error("Error uploading photos:", uploadError);
@@ -606,10 +611,10 @@ export default function EditSiteVisitPage() {
               </p>
               
               {/* Photo Upload Component */}
-              <PhotoUpload 
+              <PhotoUpload
                 photos={photos}
                 onPhotosChange={handlePhotosChange}
-                maxPhotos={10}
+                maxFiles={10}
               />
             </div>
 
@@ -640,9 +645,9 @@ export default function EditSiteVisitPage() {
       <SuccessModal
         isOpen={showSuccessModal}
         onClose={handleSuccessModalClose}
-        title="Site Visit Updated Successfully!"
+        statusCode={200}
         message="The site visit information has been updated and saved to the database."
-        confirmButtonText="Continue"
+        buttonText="Continue"
       />
     </div>
   );

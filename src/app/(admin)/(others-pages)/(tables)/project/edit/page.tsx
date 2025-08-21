@@ -22,51 +22,66 @@ const breadcrumbs = [
 ];
 
 interface FormData {
-  selectedDeveloper: string;
+interface FormErrors {
   project_name: string;
   project_description: string;
   address: IAddress;
-  is_active: boolean;
+        return results
 }
 
 interface FormErrors {
   selectedDeveloper?: string;
   project_name?: string;
-  project_description?: string;
-  address?: string;
-}
-
-export default function EditProjectPage() {
-  const router = useRouter();
-  const searchParams = useSearchParams();
-  const projectId = searchParams.get("id");
-  
   const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [errorModal, setErrorModal] = useState<{ open: boolean; statusCode?: number; message?: string }>({ open: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [showDeveloperModal, setShowDeveloperModal] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [currentPage, setCurrentPage] = useState(1);
-  const [errors, setErrors] = useState<FormErrors>({});
-  
-  const [formData, setFormData] = useState<FormData>({
-    selectedDeveloper: "",
-    project_name: "",
-    project_description: "",
-    address: {
-      province: null,
-      district: null,
-      commune: null,
-      village: null,
-      homeAddress: "",
-      streetAddress: "",
-    },
-    is_active: true
-  });
-
-  // Load project data
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!validateForm()) {
+      return;
+    }
+    setIsSubmitting(true);
+    try {
+      // Simulate API call
+      console.log("Updating project:", {
+        project_id: projectId,
+        selectedDeveloper: formData.selectedDeveloper,
+        project_name: formData.project_name,
+        project_description: formData.project_description,
+        province_id: formData.address.province?.value,
+        district_id: formData.address.district?.value,
+        commune_id: formData.address.commune?.value,
+        village_id: formData.address.village?.value,
+        is_active: formData.is_active
+      });
+      // Simulate success
+      setTimeout(() => {
+        setShowSuccessModal(true);
+        setIsSubmitting(false);
+      }, 1000);
+    } catch (err: any) {
+      setErrorModal({ open: true, statusCode: 500, message: "Failed to update project. Please try again." });
+      setIsSubmitting(false);
+    }
   useEffect(() => {
     if (projectId) {
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={() => {
+          setShowSuccessModal(false);
+          router.push("/project");
+        }}
+        statusCode={200}
+        message="Project has been updated successfully!"
+        buttonText="Go to Projects"
+      />
+      <SuccessModal
+        isOpen={errorModal.open}
+        onClose={() => setErrorModal({ open: false })}
+        statusCode={errorModal.statusCode}
+        message={errorModal.message}
+        buttonText="Okay, Got It"
+      />
       // In real app, this would be an API call
       const project = projectData.find(p => p.project_id === projectId);
       if (project) {

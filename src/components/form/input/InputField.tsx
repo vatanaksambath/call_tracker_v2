@@ -67,23 +67,26 @@ const Input: FC<InputProps> = ({
     inputClasses += ` bg-transparent text-gray-800 border-gray-300 focus:border-brand-300 focus:ring-3 focus:ring-brand-500/10 dark:border-gray-700 dark:bg-gray-900 dark:focus:border-brand-800`;
   }
 
+  // Determine if this is a controlled or uncontrolled input
+  const isControlled = rest.value !== undefined;
+  
   return (
     <div className="relative">
       <input
-        type={type} // Pass the destructured 'type'
-        id={id} // Pass the destructured 'id'
-        name={name} // Pass the destructured 'name'
-        placeholder={placeholder} // Pass the destructured 'placeholder'
-        defaultValue={defaultValue} // Pass the destructured 'defaultValue'
-        onChange={onChange} // Pass the destructured 'onChange'
-        min={min} // Pass the destructured 'min'
-        max={max} // Pass the destructured 'max'
-        step={step} // Pass the destructured 'step'
-        disabled={disabled} // Pass the destructured 'disabled'
+        type={type}
+        id={id}
+        name={name}
+        placeholder={placeholder}
+        onChange={onChange}
+        min={min}
+        max={max}
+        step={step}
+        disabled={disabled}
         className={inputClasses}
-        // --- KEY CHANGE 3: Spread the `rest` props onto the native <input> ---
-        // This is what ensures all other standard HTML <input> attributes,
-        // like `value`, `required`, `onBlur`, etc., are correctly applied.
+        {...(isControlled 
+          ? { value: rest.value ?? '' } 
+          : { defaultValue: defaultValue ?? '' }
+        )}
         {...rest}
       />
 

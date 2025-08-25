@@ -159,6 +159,9 @@ export default function CallPipelineEditForm() {
   // Submission state
   const [isSubmitting, setIsSubmitting] = useState(false);
 
+  // Pipeline Status state
+  const [pipelineStatus, setPipelineStatus] = useState<string>("");
+
   // --- Initial Loading State ---
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [callLogId, setCallLogId] = useState<string>("");
@@ -182,26 +185,33 @@ export default function CallPipelineEditForm() {
     if (!formData.purpose.trim()) newErrors.purpose = "Purpose is required.";
     setErrors(newErrors);
     if (Object.keys(newErrors).length > 0) return;
-    
+
     // TypeScript null checks (should be satisfied by validation above)
     if (!formData.selectedLead || !formData.selectedStaff || !formData.selectedProperty) {
       console.error("Missing required form data");
       return;
     }
-    
+
     setIsSubmitting(true);
-    
+
     try {
       const token = typeof window !== "undefined" ? localStorage.getItem("token") : null;
       let baseUrl = process.env.NEXT_PUBLIC_API_BASE_URL || "";
       baseUrl = baseUrl.replace(/\/+$/, "");
       const endpoint = `${baseUrl}/call-log/update`;
-      
+
+      // Only allow status_id to be changed to 8 (Success) or 9 (Fail) by user action, otherwise keep the pre-populated one
+      let status_id = pipelineStatus;
+      if (status_id !== "8" && status_id !== "9") {
+        // Use the pre-populated status_id from the API (already set in pipelineStatus on mount)
+        status_id = pipelineStatus;
+      }
+
       const updateBody = {
         call_log_id: callLogId,
         lead_id: formData.selectedLead.lead_id,
         property_profile_id: formData.selectedProperty.property_profile_id,
-        status_id: "1",
+        status_id: status_id,
         purpose: formData.purpose.trim(),
         fail_reason: null,
         follow_up_date: null,
@@ -210,10 +220,10 @@ export default function CallPipelineEditForm() {
         p_call_log_detail: [],
         updated_by: formData.selectedStaff.staff_id,
       };
-      
+
       console.log("Update API endpoint:", endpoint);
       console.log("Update API request body:", updateBody);
-      
+
       const res = await fetch(endpoint, {
         method: "PUT",
         headers: {
@@ -222,19 +232,19 @@ export default function CallPipelineEditForm() {
         },
         body: JSON.stringify(updateBody),
       });
-      
+
       if (!res.ok) {
         const errorData = await res.json().catch(() => ({}));
         console.error("Update API error response:", errorData);
         throw new Error(`Failed to update call pipeline: ${res.status} ${res.statusText}`);
       }
-      
+
       const responseData = await res.json();
       console.log("Update API success response:", responseData);
-      
-  setSuccessModalStatus(200);
-  setSuccessModalMessage("Call Pipeline Updated Successfully! Your call pipeline changes have been saved. What would you like to do next?");
-  setShowSuccessModal(true);
+
+      setSuccessModalStatus(200);
+      setSuccessModalMessage("Call Pipeline Updated Successfully! Your call pipeline changes have been saved. What would you like to do next?");
+      setShowSuccessModal(true);
     } catch (err) {
       console.error("Update call pipeline error:", err);
       setSuccessModalStatus(400);
@@ -760,17 +770,14 @@ export default function CallPipelineEditForm() {
 
   useEffect(() => {
     if (!callLogId) return;
-    
     // Check if we already have pre-populated data (from URL params)
     const urlParams = new URLSearchParams(window.location.search);
     const hasPrePopulatedData = urlParams.get('leadId') && urlParams.get('leadName') && 
                                 urlParams.get('propertyId') && urlParams.get('propertyName');
-    
     if (hasPrePopulatedData) {
       console.log("Skipping API call - using pre-populated data from CallLogsTable");
       return;
     }
-    
     console.log("No pre-populated data found, fetching from API...");
     const fetchCallLogData = async () => {
       try {
@@ -809,37 +816,15 @@ export default function CallPipelineEditForm() {
         if (logArr.length > 0) {
           const log = logArr[0];
           console.log("Raw log object:", log);
-          
           // The API response has a flat structure, not nested objects
           // Lead data is directly in the log object
           console.log("Lead fields:", {
             lead_id: log.lead_id,
             lead_name: log.lead_name,
           });
-          
           // Get contact data from call_log_details
-          let primaryContact = "";
-          if (Array.isArray(log.call_log_details) && log.call_log_details.length > 0) {
-            for (const detail of log.call_log_details) {
-              if (Array.isArray(detail.contact_data)) {
-                for (const contactGroup of detail.contact_data) {
-                  if (Array.isArray(contactGroup.contact_values)) {
-                    const primary = contactGroup.contact_values.find((v: Record<string, unknown>) => v.is_primary && v.contact_number);
-                    if (primary) {
-                      primaryContact = String(primary.contact_number);
-                      break;
-                    }
-                  }
-                }
-                if (primaryContact) break;
-              }
-            }
-            // Fallback to first contact if no primary found
-            if (!primaryContact && log.call_log_details[0]?.contact_data?.[0]?.contact_values?.[0]?.contact_number) {
-              primaryContact = String(log.call_log_details[0].contact_data[0].contact_values[0].contact_number);
-            }
-          }
-          
+          // Get primary contact directly from parent level
+          let primaryContact = log.primary_contact_number || "";
           const mappedLead: MappedLead = {
             lead_id: String(log.lead_id || ""),
             full_name: log.lead_name || "(No Name)",
@@ -847,12 +832,10 @@ export default function CallPipelineEditForm() {
             original: log,
           };
           console.log("Mapped lead:", mappedLead);
-          
           // Staff data is also directly in the log object 
           console.log("Staff fields:", {
             created_by_name: log.created_by_name,
           });
-          
           const mappedStaff: MappedStaff = {
             staff_id: "", // Not available in this response
             full_name: log.created_by_name || "(No Name)",
@@ -860,13 +843,11 @@ export default function CallPipelineEditForm() {
             original: log,
           };
           console.log("Mapped staff:", mappedStaff);
-          
           // Property data is also directly in the log object
           console.log("Property fields:", {
             property_profile_id: log.property_profile_id,
             property_profile_name: log.property_profile_name,
           });
-          
           // Fetch complete property details if we have a property_profile_id
           let mappedProperty: MappedProperty;
           if (log.property_profile_id) {
@@ -896,19 +877,22 @@ export default function CallPipelineEditForm() {
             };
           }
           console.log("Final mapped property:", mappedProperty);
-          
           setFormData({
             selectedLead: mappedLead,
             selectedStaff: mappedStaff,
             selectedProperty: mappedProperty,
             purpose: log.purpose || "",
           });
-          
+          // Set pipeline status from call log status_id if available
+          if (log.status_id) {
+            setPipelineStatus(String(log.status_id));
+          }
           console.log("Final formData set:", {
             selectedLead: mappedLead,
             selectedStaff: mappedStaff,
             selectedProperty: mappedProperty,
             purpose: log.purpose || "",
+            status_id: log.status_id,
           });
         }
       } catch (err) {
@@ -1042,7 +1026,7 @@ export default function CallPipelineEditForm() {
             <div className="lg:col-span-2">
               <Label htmlFor="selectedProperty">Edit Property *</Label>
               <div className="mt-1">
-                {formData.selectedProperty ? (
+                {formData.selectedProperty && formData.selectedProperty.property_profile_id !== '14' ? (
                   <div className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-800 rounded-lg border">
                     <div>
                       <div className="font-medium text-gray-800 dark:text-white">
@@ -1103,6 +1087,7 @@ export default function CallPipelineEditForm() {
             </div>
           </div>
 
+
           {/* Purpose - Full width */}
           <div className="mt-5">
             <Label htmlFor="purpose">Edit Purpose *</Label>
@@ -1113,6 +1098,67 @@ export default function CallPipelineEditForm() {
               rows={4}
             />
             {errors.purpose && <p className="text-sm text-red-500 mt-1">{errors.purpose}</p>}
+          </div>
+
+          {/* Pipeline Status Button Group - Modern Design (Ultra subtle inactive colors) */}
+          <div className="mt-5">
+            <Label>Pipeline Status</Label>
+            <div className="flex gap-3 mt-2 w-full max-w-md">
+              {/* New */}
+              <button
+                type="button"
+                className={`flex-[1.2] min-w-[150px] h-12 rounded-xl border text-sm font-semibold shadow-sm transition-all duration-150 focus:outline-none
+                  ${pipelineStatus === "1" ? "bg-gray-300 text-white shadow-md" : "bg-gray-25 text-gray-500"}
+                `}
+                disabled
+              >
+                New
+              </button>
+              {/* In-Progress */}
+              <button
+                type="button"
+                className={`flex-[1.2] min-w-[150px] h-12 rounded-xl border text-sm font-semibold shadow-sm transition-all duration-150 focus:outline-none
+                  ${pipelineStatus === "2" ? "bg-yellow-400 text-white shadow-md" : "bg-yellow-25 text-yellow-500"}
+                `}
+                disabled
+              >
+                In Progress
+              </button>
+              {/* Site Visit */}
+              <button
+                type="button"
+                className={`flex-[1.2] min-w-[150px] h-12 rounded-xl border text-sm font-semibold shadow-sm transition-all duration-150 focus:outline-none
+                  ${pipelineStatus === "3" ? "bg-blue-400 text-white shadow-md" : "bg-blue-25 text-blue-500"}
+                `}
+                disabled
+              >
+                Site Visit
+              </button>
+              {/* Success */}
+              <button
+                type="button"
+                className={`flex-[1.2] min-w-[150px] h-12 rounded-xl border text-sm font-semibold shadow-sm transition-all duration-150 focus:outline-none
+                  ${pipelineStatus === "8" ? "bg-green-500 text-white shadow-md" : "bg-green-25 text-green-500 hover:bg-green-50"}
+                  ${pipelineStatus !== "3" ? "opacity-50 cursor-not-allowed" : ""}
+                `}
+                onClick={() => {
+                  if (pipelineStatus === "3") setPipelineStatus("8");
+                }}
+                disabled={pipelineStatus !== "3"}
+              >
+                Success
+              </button>
+              {/* Fail */}
+              <button
+                type="button"
+                className={`flex-[1.2] min-w-[150px] h-12 rounded-xl border text-sm font-semibold shadow-sm transition-all duration-150 focus:outline-none
+                  ${pipelineStatus === "9" ? "bg-red-500 text-white shadow-md" : "bg-red-25 text-red-500 hover:bg-red-50"}
+                `}
+                onClick={() => setPipelineStatus("9")}
+              >
+                Fail
+              </button>
+            </div>
           </div>
 
           {/* Action Buttons */}

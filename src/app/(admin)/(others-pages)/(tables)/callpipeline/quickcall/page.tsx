@@ -35,6 +35,7 @@ import {
 interface SelectOption {
   value: string;
   label: string;
+  contact_result_description?: string;
 }
 
 interface CallLogDetail {
@@ -52,6 +53,7 @@ interface CallLogDetail {
   updated_at: string;
   caller_name: string;
   lead_name: string;
+  primary_contact_number: string;
 }
 
 interface CallLogPaginationResponse {
@@ -72,6 +74,7 @@ interface ApiCallLog {
   updated_at: string;
   caller_name: string;
   lead_name: string;
+  primary_contact_number: string;
   created_by_name: string;
   call_log_details: ApiCallLogDetail[];
 }
@@ -304,6 +307,7 @@ const QuickCallPage: React.FC = () => {
   
   // Call history state
   const [callHistory, setCallHistory] = useState<CallLogDetail[]>([]);
+  const [currentCallLog, setCurrentCallLog] = useState<ApiCallLog | null>(null);
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
@@ -330,7 +334,7 @@ const QuickCallPage: React.FC = () => {
   // Dropdown options state
   const [statusOptions, setStatusOptions] = useState<SelectOption[]>([]);
   const [isLoadingStatus, setIsLoadingStatus] = useState(false);
-  const [contactResults, setContactResults] = useState<Record<number, string>>({});
+  const [contactResults, setContactResults] = useState<Record<string, string>>({});
 
   // Breadcrumb configuration
   const breadcrumbs = [
@@ -393,15 +397,16 @@ const QuickCallPage: React.FC = () => {
         const data = await response.json();
         const apiResult = data[0];
         if (apiResult?.data) {
-          const options = apiResult.data.map((result: { contact_result_id: number, contact_result_name: string }) => ({ 
+          const options = apiResult.data.map((result: { contact_result_id: number, contact_result_name: string, contact_result_description?: string }) => ({ 
             value: result.contact_result_id.toString(), 
-            label: result.contact_result_name 
+            label: result.contact_result_name,
+            contact_result_description: result.contact_result_description || ""
           }));
           setStatusOptions(options);
           
-          const resultsMap: Record<number, string> = {};
+          const resultsMap: Record<string, string> = {};
           apiResult.data.forEach((result: { contact_result_id: number, contact_result_name: string }) => {
-            resultsMap[result.contact_result_id] = result.contact_result_name;
+            resultsMap[result.contact_result_id.toString()] = result.contact_result_name;
           });
           setContactResults(resultsMap);
         }
@@ -437,6 +442,11 @@ const QuickCallPage: React.FC = () => {
           const allCallDetails: CallLogDetail[] = [];
           
           if (paginationData.data && Array.isArray(paginationData.data)) {
+            // Store the first call log for card display
+            if (paginationData.data.length > 0) {
+              setCurrentCallLog(paginationData.data[0]);
+            }
+            
             paginationData.data.forEach((callLog: ApiCallLog) => {
               if (callLog.call_log_details && Array.isArray(callLog.call_log_details)) {
                 callLog.call_log_details.forEach((detail: ApiCallLogDetail) => {
@@ -458,8 +468,8 @@ const QuickCallPage: React.FC = () => {
                     call_end_datetime: detail.call_end_datetime || 'N/A',
                     total_call_minute: detail.total_call_minute || 0,
                     contact_result_id: detail.contact_result_id || 0,
-                    contact_result_name: (contactResults && contactResults[detail.contact_result_id])
-                      ? contactResults[detail.contact_result_id]
+                    contact_result_name: (contactResults && contactResults[detail.contact_result_id?.toString()])
+                      ? contactResults[detail.contact_result_id?.toString()]
                       : (detail.contact_result_name || 'Unknown'),
                     lead_contact_id: detail.lead_contact_id || 0,
                     contact_number: contactNumber,
@@ -468,6 +478,7 @@ const QuickCallPage: React.FC = () => {
                     updated_at: detail.updated_at || callLog.updated_at || 'N/A',
                     caller_name: callerName,
                     lead_name: callLog.lead_name || 'Unknown Lead',
+                    primary_contact_number: callLog.primary_contact_number || 'N/A',
                   });
                 });
               }
@@ -620,6 +631,22 @@ const QuickCallPage: React.FC = () => {
           }))
         }));
       }
+      // If contactData is still empty, create it from primary_contact_number and lead_name
+      if (contactData.length === 0 && currentLog.primary_contact_number && currentLog.lead_name) {
+        contactData = [
+          {
+            channel_type_id: "3",
+            contact_values: [
+              {
+                user_name: currentLog.lead_name,
+                contact_number: currentLog.primary_contact_number,
+                remark: "Mobile",
+                is_primary: true
+              }
+            ]
+          }
+        ];
+      }
 
       // Prepare dates and times
       const callDate = editFormData.callDate instanceof Date 
@@ -659,6 +686,20 @@ const QuickCallPage: React.FC = () => {
         throw new Error(`Call log detail update failed with status ${updateResponse.status}`);
       }
 
+      // Map contact result id to parent status id using contact_result_description from statusOptions
+      // Robust mapping: get contact_result_description for status_id based on selected contact_result_id
+      let parentStatusId = "1";
+      if (editFormData.callStatus && editFormData.callStatus.value && statusOptions.length > 0) {
+        const selected = statusOptions.find(
+          (item) => String(item.value) === String(editFormData.callStatus!.value)
+        );
+        if (selected && selected.contact_result_description && selected.contact_result_description.length > 0) {
+          parentStatusId = selected.contact_result_description;
+        } else {
+          parentStatusId = String(editFormData.callStatus.value);
+        }
+      }
+
       // Handle follow-up update if necessary
       if (editFormData.isFollowUp && editFormData.followUpDate) {
         let followUpDate = null;
@@ -671,7 +712,7 @@ const QuickCallPage: React.FC = () => {
           call_log_id: callLogIdFromUrl,
           lead_id: currentLog.lead_id,
           property_profile_id: String(currentLog.property_profile_id),
-          status_id: String(currentLog.status_id || "1"),
+          status_id: parentStatusId,
           purpose: currentLog.purpose || "Call pipeline management",
           fail_reason: currentLog.fail_reason || null,
           follow_up_date: followUpDate,
@@ -679,6 +720,7 @@ const QuickCallPage: React.FC = () => {
           is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
           updated_by: "1"
         };
+        console.log('[QuickCall Edit] PUT /call-log/update body:', callLogUpdateRequestBody);
 
         const callLogUpdateResponse = await fetch(`${getApiBase()}/call-log/update`, {
           method: "PUT",
@@ -765,6 +807,22 @@ const QuickCallPage: React.FC = () => {
           }));
         }
       }
+      // If contactData is still empty, create it from primary_contact_number and lead_name
+      if (contactData.length === 0 && currentLog.primary_contact_number && currentLog.lead_name) {
+        contactData = [
+          {
+            channel_type_id: "3",
+            contact_values: [
+              {
+                user_name: currentLog.lead_name,
+                contact_number: currentLog.primary_contact_number,
+                remark: "Mobile",
+                is_primary: true
+              }
+            ]
+          }
+        ];
+      }
 
       if (contactData.length === 0) {
         alert('No contact data found for this call log. Please ensure the call log has contact information.');
@@ -793,7 +851,7 @@ const QuickCallPage: React.FC = () => {
         menu_id: "MU_02",
         contact_data: contactData
       };
-      
+      console.log("Call Log Detail Request Body:", callLogDetailRequestBody);
       const callLogDetailResponse = await fetch(`${getApiBase()}/call-log-detail/create`, {
         method: "POST",
         headers: getApiHeaders(),
@@ -807,32 +865,104 @@ const QuickCallPage: React.FC = () => {
       }
 
       // Update call log with follow-up information if needed
-      if (formData.isFollowUp && formData.followUpDate) {
-        let followUpDate = null;
-        if (formData.followUpDate instanceof Date) {
-          const d = formData.followUpDate;
-          followUpDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-        }
+      // Always fetch the current call log to check for status change
+      let followUpDate = null;
+      if (formData.followUpDate instanceof Date) {
+        const d = formData.followUpDate;
+        followUpDate = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
 
+      // Map child status (MU_02) to parent status_id using contact_result_description
+      let parentStatusId = "1";
+      let selectedContactResultDescription: string | undefined = undefined;
+      if (formData.callStatus && formData.callStatus.value) {
+        try {
+          const statusRes = await fetch(`${getApiBase()}/contact-result/pagination`, {
+            method: "POST",
+            headers: getApiHeaders(),
+            body: JSON.stringify({ 
+              page_number: "1", 
+              page_size: "100",
+              menu_id: "MU_02",
+              search_type: "",
+              query_search: ""
+            })
+          });
+          if (statusRes.ok) {
+            const statusData = await statusRes.json();
+            const allStatuses: unknown[] = statusData[0]?.data || [];
+            const found = allStatuses.find((s): s is { contact_result_id: number|string, contact_result_description?: string } => {
+              if (
+                typeof s === 'object' &&
+                s !== null &&
+                'contact_result_id' in s &&
+                (s as { contact_result_id: unknown }).contact_result_id !== undefined
+              ) {
+                return String((s as { contact_result_id: unknown }).contact_result_id) === formData.callStatus?.value;
+              }
+              return false;
+            });
+            if (found && found.contact_result_description) {
+              selectedContactResultDescription = String(found.contact_result_description);
+            }
+          }
+        } catch (err) {
+          console.warn("Could not fetch MU_02 status for parent mapping", err);
+        }
+      }
+
+      // Always fetch the current call log to check for status change
+      let shouldUpdate = false;
+      let currentParentStatusId = "1";
+      let currentParentLog = null;
+      try {
+        const getCurrentCallLogResponse = await fetch(`${getApiBase()}/call-log/pagination`, {
+          method: "POST",
+          headers: getApiHeaders(),
+          body: JSON.stringify({
+            page_number: "1",
+            page_size: "10",
+            search_type: "call_log_id",
+            query_search: callLogIdFromUrl,
+          }),
+        });
+        if (getCurrentCallLogResponse.ok) {
+          const currentCallLogData = await getCurrentCallLogResponse.json();
+          if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
+            currentParentLog = currentCallLogData[0].data[0];
+            currentParentStatusId = String(currentParentLog.status_id);
+            // Only update if follow-up is set OR status_id is changed
+            if (
+              (formData.isFollowUp && followUpDate) ||
+              (typeof selectedContactResultDescription === 'string' && currentParentStatusId !== selectedContactResultDescription)
+            ) {
+              shouldUpdate = true;
+              parentStatusId = selectedContactResultDescription || "1";
+            }
+          }
+        }
+      } catch (err) {
+        console.warn("Could not fetch current call log for parent status check", err);
+      }
+
+      if (shouldUpdate && currentParentLog) {
         const callLogUpdateRequestBody = {
           call_log_id: callLogIdFromUrl,
-          lead_id: currentLog.lead_id,
-          property_profile_id: String(currentLog.property_profile_id),
-          status_id: String(currentLog.status_id || "1"),
-          purpose: currentLog.purpose || "Call pipeline management",
-          fail_reason: currentLog.fail_reason || null,
+          lead_id: currentParentLog.lead_id,
+          property_profile_id: String(currentParentLog.property_profile_id),
+          status_id: parentStatusId,
+          purpose: currentParentLog.purpose || "Call pipeline management",
+          fail_reason: currentParentLog.fail_reason || null,
           follow_up_date: followUpDate,
           is_follow_up: formData.isFollowUp,
-          is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
+          is_active: currentParentLog.is_active !== undefined ? currentParentLog.is_active : true,
           updated_by: "1"
         };
-
         const callLogUpdateResponse = await fetch(`${getApiBase()}/call-log/update`, {
           method: "PUT",
           headers: getApiHeaders(),
           body: JSON.stringify(callLogUpdateRequestBody),
         });
-        
         if (!callLogUpdateResponse.ok) {
           const updateErrorText = await callLogUpdateResponse.text();
           console.warn("Follow-up update warning (non-critical):", updateErrorText);
@@ -1067,10 +1197,10 @@ const QuickCallPage: React.FC = () => {
               <div className="ml-4 min-w-0 flex-1">
                 <div>
                   <h4 className="text-lg font-bold text-black dark:text-white truncate">
-                    {callHistory.length > 0 ? callHistory[0].lead_name : 'N/A'}
+                    {currentCallLog && currentCallLog.primary_contact_number ? formatPhoneNumber(currentCallLog.primary_contact_number) : 'No Primary Contact'}
                   </h4>
                   <span className="text-xs font-medium text-gray-500 dark:text-gray-400 truncate block">
-                    {callHistory.length > 0 ? formatPhoneNumber(callHistory[0].contact_number) : 'No Phone'}
+                    {currentCallLog ? currentCallLog.lead_name : 'N/A'}
                   </span>
                 </div>
               </div>

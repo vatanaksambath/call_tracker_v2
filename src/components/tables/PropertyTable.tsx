@@ -209,6 +209,11 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
     return `$${price.toLocaleString()}`;
   };
 
+  // Format Property ID to display property_profile_id directly
+  const formatPropertyId = (property: Property): string => {
+    return String(property.raw.property_profile_id);
+  };
+
   // Format datetime with AM/PM
   const formatDateTime = (dateString: string) => {
     if (!dateString) return '-';
@@ -324,7 +329,15 @@ export default function PropertyTable({ searchTerm = "", visibleColumns }: Prope
                         const value = property[column.key];
                         
                         // Format specific columns with subtle emphasis
-                        if (column.key === 'name' && typeof value === 'string') {
+                        if (column.key === 'id') {
+                          return (
+                            <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
+                              <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-800 dark:text-gray-300">
+                                {formatPropertyId(property)}
+                              </span>
+                            </TableCell>
+                          );
+                        } else if (column.key === 'name' && typeof value === 'string') {
                           return (
                             <TableCell key={`${property.id || rowIdx}-col-${column.key}`} className="px-5 py-3 text-gray-800 text-theme-sm dark:text-white/90">
                               <HighlightedCell className="text-gray-900 dark:text-white">

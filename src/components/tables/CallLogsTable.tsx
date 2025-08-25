@@ -64,6 +64,8 @@ const formatPhoneNumber = (phone: string): string => {
 // Format property value to $000,000 format
 const formatPropertyValue = (value: number): string => {
   if (!value && value !== 0) return "";
+  // Return "-" for values 0 or 1
+  if (value === 0 || value === 1) return "-";
   return `$${value.toLocaleString('en-US')}`;
 };
 
@@ -122,7 +124,9 @@ export const callLogColumnConfig: { key: keyof CallLog; label: string; highlight
   { key: 'property_type_name', label: 'Property Type', highlight: true },
   { key: 'total_call', label: 'Total Call', highlight: true },
   { key: 'total_site_visit', label: 'Total Site Visit', highlight: true },
-  { key: 'status', label: 'Status', highlight: true },
+  { key: 'pipeline_status', label: 'Pipeline Status', highlight: true },
+  { key: 'latest_status_id', label: 'Latest Status ID' },
+  { key: 'latest_status_name', label: 'Latest Status Name' },
   // Additional columns available in column selector
   { key: 'lead_id', label: 'Lead ID' },
   { key: 'property_profile_id', label: 'Property Profile ID' },
@@ -147,8 +151,54 @@ export const defaultVisibleColumns: (keyof CallLog)[] = [
   'property_type_name',
   'total_call',
   'total_site_visit',
-  'status'
+  'pipeline_status',
+  'latest_status_id',
+  'latest_status_name',
 ];
+// Utility to get latest status from call_log_details and site_visit_details
+function getLatestStatusInfo(callLog: CallLog): { latest_status_id?: number, latest_status_name?: string } {
+  let latest: { date: string, contact_result_id?: number, contact_result_name?: string } | null = null;
+  // Helper to parse date+time or fallback to created_date
+  function getDateTime(obj: any, dateKey: string, timeKey?: string) {
+    if (obj[dateKey]) {
+      if (timeKey && obj[timeKey]) {
+        return `${obj[dateKey]} ${obj[timeKey]}`;
+      }
+      return obj[dateKey];
+    }
+    return obj.created_date || '';
+  }
+  // Check call_log_details
+  if (Array.isArray(callLog.call_log_details)) {
+    for (const d of callLog.call_log_details) {
+      const dateStr = getDateTime(d, 'call_date', 'call_end_datetime');
+      if (!latest || (dateStr > latest.date)) {
+        latest = {
+          date: dateStr,
+          contact_result_id: d.contact_result_id,
+          contact_result_name: d.contact_result_name,
+        };
+      }
+    }
+  }
+  // Check site_visit_details
+  if (Array.isArray(callLog.site_visit_details)) {
+    for (const d of callLog.site_visit_details) {
+      const dateStr = getDateTime(d, 'start_datetime');
+      if (!latest || (dateStr > latest.date)) {
+        latest = {
+          date: dateStr,
+          contact_result_id: d.contact_result_id,
+          contact_result_name: d.contact_result_name,
+        };
+      }
+    }
+  }
+  return {
+    latest_status_id: latest?.contact_result_id,
+    latest_status_name: latest?.contact_result_name,
+  };
+}
 
 // Primary Actions Menu: View, Edit, Quick Call, Quick Site Visit, Delete
 const PrimaryActionsMenu = ({ callLog, onSelect }: { callLog: CallLog; onSelect: (action: 'view' | 'edit' | 'delete' | 'quickCall' | 'quickSiteVisit' | 'siteVisit' | 'viewCallHistory' | 'loanPaymentSchedule', callLog: CallLog) => void; }) => {
@@ -270,6 +320,15 @@ export default function CallLogsTable({
   setVisibleColumns?: (columns: (keyof CallLog)[]) => void;
 }) {
   const router = useRouter();
+  // Precompute latest status for each row (move outside JSX)
+  const dataWithLatest = React.useMemo(() => {
+    return data.map((row) => {
+      const latest = getLatestStatusInfo(row);
+      // Always map pipeline_status from the 'status' field in the API response
+      const pipeline_status = row.status || row.pipeline_status || '';
+      return { ...row, pipeline_status, ...latest };
+    });
+  }, [data]);
   
   // Quick Call Modal State
   const [showQuickCallModal, setShowQuickCallModal] = useState(false);
@@ -324,95 +383,29 @@ export default function CallLogsTable({
   const [isLoadingContacts, setIsLoadingContacts] = useState(false);
   const [leadContactData, setLeadContactData] = useState<ContactData[]>([]);
 
-  // Phone numbers mapped by lead_id
-  const [leadPhoneNumbers, setLeadPhoneNumbers] = useState<Record<string, string>>({});
-  const [isLoadingPhoneNumbers, setIsLoadingPhoneNumbers] = useState(false);
-
-  // Call status options - fetched from API
+  // Call status options - fetched from API (Quick Call)
   const [statusOptions, setStatusOptions] = useState<SelectOption[]>([]);
+  // Site Visit status options - fetched from API (menu_id: 'MU_03')
+  const [siteVisitStatusOptions, setSiteVisitStatusOptions] = useState<SelectOption[]>([]);
+  // Define type for contact result data
+  interface ContactResultData {
+    contact_result_id: number;
+    contact_result_name: string;
+    contact_result_description?: string;
+    // Add other known fields if needed
+  }
+  // Store full contact result API data for mapping (Quick Call)
+  const [contactResultList, setContactResultList] = useState<ContactResultData[]>([]);
+  // Store full contact result API data for mapping (Site Visit)
+  const [siteVisitContactResultList, setSiteVisitContactResultList] = useState<ContactResultData[]>([]);
 
-  // Function to fetch phone numbers for leads
-  const fetchLeadPhoneNumbers = React.useCallback(async (leadIds: string[]) => {
-    if (leadIds.length === 0) return;
-    
-    setIsLoadingPhoneNumbers(true);
-    try {
-      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
-      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
-      const headers: Record<string, string> = { "Content-Type": "application/json" };
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      
-      const phoneNumberMap: Record<string, string> = {};
-      
-      // Fetch phone numbers for each unique lead_id
-      for (const leadId of leadIds) {
-        try {
-          const response = await fetch(`${apiBase}/lead/pagination`, {
-            method: "POST",
-            headers,
-            body: JSON.stringify({
-              page_number: "1",
-              page_size: "10",
-              search_type: "lead_id",
-              query_search: leadId,
-            })
-          });
-          if (response.ok) {
-            const data = await response.json();
-            if (Array.isArray(data) && data.length > 0 && data[0].data && Array.isArray(data[0].data)) {
-              const leadData = data[0].data[0];
-              if (leadData.contact_data && Array.isArray(leadData.contact_data)) {
-                let phoneNumber = 'Unknown Number';
-                // Look for contact with channel_type_id: 3 and is_primary: true
-                for (const contactGroup of leadData.contact_data) {
-                  if (contactGroup.channel_type_id === 3 && contactGroup.contact_values && Array.isArray(contactGroup.contact_values)) {
-                    const primaryContact = contactGroup.contact_values.find((contact: { is_primary: boolean; contact_number: string }) =>
-                      contact.is_primary === true && contact.contact_number
-                    );
-                    if (primaryContact) {
-                      phoneNumber = primaryContact.contact_number;
-                      break;
-                    }
-                  }
-                }
-                phoneNumberMap[leadId] = phoneNumber;
-              } else {
-                phoneNumberMap[leadId] = 'Unknown Number';
-              }
-            }
-          }
-        } catch (error) {
-          phoneNumberMap[leadId] = 'Unknown Number';
-        }
-      }
-      
-      setLeadPhoneNumbers(prev => ({ ...prev, ...phoneNumberMap }));
-  // ...
-    } catch (error) {
-      console.error("Error fetching lead phone numbers:", error);
-    } finally {
-      setIsLoadingPhoneNumbers(false);
-    }
-  }, []);
-
-  // Effect to fetch phone numbers when data changes
-  React.useEffect(() => {
-    const uniqueLeadIds = Array.from(new Set(data.map(callLog => callLog.lead_id).filter(Boolean)));
-  // ...
-    if (uniqueLeadIds.length > 0) {
-      fetchLeadPhoneNumbers(uniqueLeadIds);
-    }
-  }, [data, fetchLeadPhoneNumbers]);
-
-  // Fetch contact result options from API
+  // Fetch contact result options for Quick Call (menu_id: 'MU_02')
   useEffect(() => {
     async function fetchContactResults() {
       const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
-      // Get token from localStorage
       const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
       const headers: Record<string, string> = { "Content-Type": "application/json" };
       if (token) headers["Authorization"] = `Bearer ${token}`;
-      
       try {
         const response = await fetch(`${apiBase}/contact-result/pagination`, {
           method: "POST",
@@ -426,20 +419,56 @@ export default function CallLogsTable({
           })
         });
         const data = await response.json();
-  // ...
         const apiResult = data[0];
         if (apiResult && apiResult.data) {
+          setContactResultList(apiResult.data);
           setStatusOptions(apiResult.data.map((result: { contact_result_id: number, contact_result_name: string }) => ({ 
             value: result.contact_result_id.toString(), 
             label: result.contact_result_name 
           })));
         }
-      } catch (err) {
-  // ...
+      } catch {
         setStatusOptions([]);
+        setContactResultList([]);
       }
     }
     fetchContactResults();
+  }, []);
+
+  // Fetch contact result options for Site Visit (menu_id: 'MU_03')
+  useEffect(() => {
+    async function fetchSiteVisitContactResults() {
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+      try {
+        const response = await fetch(`${apiBase}/contact-result/pagination`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({ 
+            page_number: "1", 
+            page_size: "100",
+            menu_id: "MU_03",
+            search_type: "",
+            query_search: ""
+          })
+        });
+        const data = await response.json();
+        const apiResult = data[0];
+        if (apiResult && apiResult.data) {
+          setSiteVisitContactResultList(apiResult.data);
+          setSiteVisitStatusOptions(apiResult.data.map((result: { contact_result_id: number, contact_result_name: string }) => ({ 
+            value: result.contact_result_id.toString(), 
+            label: result.contact_result_name 
+          })));
+        }
+      } catch {
+        setSiteVisitStatusOptions([]);
+        setSiteVisitContactResultList([]);
+      }
+    }
+    fetchSiteVisitContactResults();
   }, []);
 
 
@@ -453,7 +482,7 @@ export default function CallLogsTable({
       // Load pipeline information
       await loadPipelineInfo(callLog.call_log_id || '');
       setShowQuickCallModal(true);
-    } catch (error) {
+    } catch {
       alert("Failed to load pipeline information. Please try again.");
     } finally {
       setIsLoadingPipeline(false);
@@ -469,7 +498,7 @@ export default function CallLogsTable({
       // Load pipeline information
       await loadPipelineInfo(callLog.call_log_id || '');
       setShowQuickSiteVisitModal(true);
-    } catch (error) {
+    } catch {
       alert("Failed to load pipeline information. Please try again.");
     } finally {
       setIsLoadingPipeline(false);
@@ -508,15 +537,15 @@ export default function CallLogsTable({
       }
       if (logArr.length > 0) {
         const log = logArr[0];
-        const extractedCallerPhone = leadPhoneNumbers[log.lead_id] || "N/A";
-        const extractedLeadPhone = leadPhoneNumbers[log.lead_id] || "N/A";
+        const extractedCallerPhone = log.primary_contact_number || "N/A";
+        const extractedLeadPhone = log.primary_contact_number || "N/A";
         setPipelineInfo({
           pipelineId: log.call_log_id || "",
-          pipelineName: `${log.lead_name || 'Unknown Lead'} - ${log.property_profile_name || 'Unknown Property'}`,
+          pipelineName: `${log.lead_name || 'Unknown Lead'} - ${(log.property_profile_name === 'NA' || log.property_profile_name === 'N/A' || !log.property_profile_name) ? 'Not Set' : log.property_profile_name}`,
           leadId: log.lead_id || "",
           leadName: log.lead_name || "Unknown Lead",
           leadCompany: "N/A",
-          propertyName: log.property_profile_name || "Unknown Property",
+          propertyName: (log.property_profile_name === 'NA' || log.property_profile_name === 'N/A' || !log.property_profile_name) ? 'Not Set' : log.property_profile_name,
           propertyLocation: "N/A",
           propertyProfileId: log.property_profile_id || "",
           propertyPrice: log.property_profile_price || undefined,
@@ -529,7 +558,7 @@ export default function CallLogsTable({
     } catch (error) {
       throw error;
     }
-  }, [leadPhoneNumbers]);
+  }, []);
 
   // Fetch contact data for dropdown
   React.useEffect(() => {
@@ -707,7 +736,7 @@ export default function CallLogsTable({
               matchingContactData.push({
                 channel_type_id: String(contactGroup.channel_type_id),
                 contact_values: matchingContacts.map(contact => ({
-                  user_name: contact.user_name,
+                  user_name: pipelineInfo.leadName,
                   contact_number: contact.contact_number,
                   remark: contact.remark || "Mobile",
                   is_primary: contact.is_primary
@@ -723,9 +752,24 @@ export default function CallLogsTable({
   // ...
 
       if (matchingContactData.length === 0) {
-  // ...
-        alert(`No contact data found matching the caller phone (${pipelineInfo.callerPhone}) or lead phone (${pipelineInfo.leadPhone}). Please ensure the lead has the correct contact information.`);
-        return;
+        // Fallback: create contact_data from pipelineInfo.leadName (from call-log/pagination parent level) and pipelineInfo.leadPhone
+        const parentLeadName = pipelineInfo.leadName || '';
+        if (pipelineInfo.leadPhone && parentLeadName) {
+          matchingContactData.push({
+            channel_type_id: "3",
+            contact_values: [
+              {
+                user_name: pipelineInfo.leadName,
+                contact_number: pipelineInfo.leadPhone,
+                remark: "Mobile",
+                is_primary: true
+              }
+            ]
+          });
+        } else {
+          alert(`No contact data found matching the caller phone (${pipelineInfo.callerPhone}) or lead phone (${pipelineInfo.leadPhone}). Please ensure the lead has the correct contact information.`);
+          return;
+        }
       }
 
       const callDate = formData.callDate instanceof Date 
@@ -784,6 +828,7 @@ export default function CallLogsTable({
       if (token) headers["Authorization"] = `Bearer ${token}`;
 
       console.log("13. Step 1 API Details:");
+      console.log("13. Step 1 API Details: ", JSON.stringify(callLogDetailRequestBody));
   // ...
       // Call the first API to create call log detail
       const callLogDetailResponse = await fetch(`${apiBase}/call-log-detail/create`, {
@@ -801,60 +846,96 @@ export default function CallLogsTable({
   throw new Error(`Call log detail creation failed with status ${callLogDetailResponse.status}`);
       }
       
-      const callLogDetailResponseData = await callLogDetailResponse.json();
+      await callLogDetailResponse.json();
   // ...
 
-      // STEP 2: Update call log with follow-up information (if follow-up is enabled)
-      if (formData.isFollowUp && followUpDate) {
-  // ...
-        
-        // We need to get the current call log data first to preserve existing details
-        const getCurrentCallLogResponse = await fetch(`${apiBase}/call-log/pagination`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            page_number: "1",
-            page_size: "10",
-            search_type: "call_log_id",
-            query_search: pipelineInfo.pipelineId,
-          }),
-        });
-        if (getCurrentCallLogResponse.ok) {
-          const currentCallLogData = await getCurrentCallLogResponse.json();
-          if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
-            const currentLog = currentCallLogData[0].data[0];
-            // Prepare the call log update request with the expected structure (no call log detail fetch)
-            const callLogUpdateRequestBody = {
-              call_log_id: pipelineInfo.pipelineId,
-              lead_id: currentLog.lead_id,
-              property_profile_id: String(currentLog.property_profile_id),
-              status_id: String(currentLog.status_id || "1"),
-              purpose: currentLog.purpose || "Call pipeline management",
-              fail_reason: currentLog.fail_reason || null,
-              follow_up_date: followUpDate, // Updated field
-              is_follow_up: formData.isFollowUp, // Updated field
-              is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
-              updated_by: "1" // You might want to get this from user context
-            };
-            console.log("=== STEP 2: CALL LOG UPDATE API REQUEST ===");
-            console.log("17. Step 2 API Details:", callLogUpdateRequestBody);
-            // Call the second API to update call log with follow-up information
-            const callLogUpdateResponse = await fetch(`${apiBase}/call-log/update`, {
-              method: "PUT",
-              headers,
-              body: JSON.stringify(callLogUpdateRequestBody),
-            });
-            console.log("📡 API CALL 2 COMPLETED");
-            console.log("18. Step 2 API Response Status:", callLogUpdateResponse.status, callLogUpdateResponse.statusText);
-            if (!callLogUpdateResponse.ok) {
-              await callLogUpdateResponse.json().catch(() => ({}));
-              // Don't throw error here, as the call log detail was already created successfully
-            } else {
-              await callLogUpdateResponse.json();
-            }
+  // STEP 2: Update call log with follow-up information or status update
+  // Find the selected contact_result_description from quick call dropdown
+  let selectedContactResultDescription: string | undefined = undefined;
+  if (formData.callStatus && formData.callStatus.value && contactResultList.length > 0) {
+    const selected = contactResultList.find(
+      (item) => item.contact_result_id === parseInt(formData.callStatus!.value, 10)
+    );
+    if (selected && typeof selected.contact_result_description === 'string') {
+      selectedContactResultDescription = selected.contact_result_description;
+    }
+  }
+
+  // Always fetch the current call log to check for status change
+  const getCurrentCallLogResponse = await fetch(`${apiBase}/call-log/pagination`, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      page_number: "1",
+      page_size: "10",
+      search_type: "call_log_id",
+      query_search: pipelineInfo.pipelineId,
+    }),
+  });
+  if (getCurrentCallLogResponse.ok) {
+    const currentCallLogData = await getCurrentCallLogResponse.json();
+    if (
+      Array.isArray(currentCallLogData) &&
+      currentCallLogData.length > 0 &&
+      currentCallLogData[0].data &&
+      Array.isArray(currentCallLogData[0].data) &&
+      currentCallLogData[0].data.length > 0
+    ) {
+      const currentLog = currentCallLogData[0].data[0];
+      const parentStatusId = String(currentLog.status_id);
+      // Only update if follow-up is set OR status_id is changed
+      if (
+        (formData.isFollowUp && followUpDate) ||
+        (typeof selectedContactResultDescription === 'string' && parentStatusId !== selectedContactResultDescription)
+      ) {
+        // Map contact_result_id (from quick call) to contact_result_description for status_id
+        let statusId = "1";
+        let selected: ContactResultData | undefined = undefined;
+        if (formData.callStatus && formData.callStatus.value && contactResultList.length > 0) {
+          selected = contactResultList.find(
+            (item) => item.contact_result_id === parseInt(formData.callStatus!.value, 10)
+          );
+          if (selected && typeof selected.contact_result_description === 'string') {
+            statusId = selected.contact_result_description;
+          } else {
+            // fallback: use value
+            statusId = String(formData.callStatus.value);
           }
         }
+        // Debug log for mapping
+        console.log('[DEBUG] statusId for call-log/update:', statusId, 'selected:', selected, 'formData.callStatus:', formData.callStatus, 'contactResultList:', contactResultList);
+        // Prepare the call log update request with the expected structure (no call log detail fetch)
+        const callLogUpdateRequestBody = {
+          call_log_id: pipelineInfo.pipelineId,
+          lead_id: currentLog.lead_id,
+          property_profile_id: String(currentLog.property_profile_id),
+          status_id: statusId,
+          purpose: currentLog.purpose || "Call pipeline management",
+          fail_reason: currentLog.fail_reason || null,
+          follow_up_date: followUpDate, // Updated field
+          is_follow_up: formData.isFollowUp, // Updated field
+          is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
+          updated_by: "1" // You might want to get this from user context
+        };
+        console.log("=== STEP 2: CALL LOG UPDATE API REQUEST ===");
+        console.log("[DEBUG] 17. Step 2 API Details:", callLogUpdateRequestBody);
+        // Call the second API to update call log with follow-up information or status
+        const callLogUpdateResponse = await fetch(`${apiBase}/call-log/update`, {
+          method: "PUT",
+          headers,
+          body: JSON.stringify(callLogUpdateRequestBody),
+        });
+        console.log("📡 API CALL 2 COMPLETED");
+        console.log("18. Step 2 API Response Status:", callLogUpdateResponse.status, callLogUpdateResponse.statusText);
+        if (!callLogUpdateResponse.ok) {
+          await callLogUpdateResponse.json().catch(() => ({}));
+          // Don't throw error here, as the call log detail was already created successfully
+        } else {
+          await callLogUpdateResponse.json();
+        }
       }
+    }
+  }
       
       console.log("=== END QUICK CALL SAVE DEBUG ===");
   // ...
@@ -933,48 +1014,50 @@ export default function CallLogsTable({
     setSiteVisitErrors({});
   };
 
-  // Upload single photo function for site visit (following lead edit pattern)
-  const uploadSiteVisitPhotoToStorage = async (photoFile: File, siteVisitId: string): Promise<string> => {
+
+  // Upload multiple photos for site visit (batch, like working page)
+  const uploadMultipleSiteVisitPhotos = async (photoFiles: PhotoFile[], siteVisitId: string): Promise<string[]> => {
+    if (photoFiles.length === 0) return [];
     const photoFormData = new FormData();
-    photoFormData.append('photo', photoFile);
+    photoFiles.forEach((photo) => {
+      if (photo.file) {
+        photoFormData.append('photo', photo.file);
+      }
+    });
     photoFormData.append('menu', 'site_visit');
     photoFormData.append('photoId', String(siteVisitId));
-
     const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
     const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    const uploadResponse = await fetch(`${apiBase}/files/upload-one-photo`, {
+    // Do not set Content-Type, let browser set it for multipart/form-data
+    const uploadResponse = await fetch(`${apiBase}/files/upload-multiple-photos`, {
       method: 'POST',
       headers,
       body: photoFormData,
     });
-
     if (!uploadResponse.ok) {
       const errorData = await uploadResponse.json().catch(() => ({}));
       throw new Error(errorData.message || `Photo upload failed with status ${uploadResponse.status}`);
     }
-
     const uploadData = await uploadResponse.json();
-    return uploadData.photoUrl || uploadData.url || '';
+    const imageUrls = uploadData.imageUrls;
+    if (!imageUrls || !Array.isArray(imageUrls)) {
+      throw new Error('No imageUrls array returned from upload response');
+    }
+    return imageUrls;
   };
 
   const handleSiteVisitSave = async () => {
     if (!validateSiteVisit() || !pipelineInfo) return;
     try {
       setIsSubmitting(true);
-      // Upload photos first (following site visit create pattern)
-      const photoUrls: string[] = [];
+      // Upload photos first (batch, like working page)
+      let photoUrls: string[] = [];
       if (siteVisitPhotos.length > 0) {
         try {
           const tempSiteVisitId = `SV-${Date.now()}`;
-          for (const photoFile of siteVisitPhotos) {
-            if (photoFile.file) {
-              const uploadedUrl = await uploadSiteVisitPhotoToStorage(photoFile.file, tempSiteVisitId);
-              photoUrls.push(uploadedUrl);
-            }
-          }
+          photoUrls = await uploadMultipleSiteVisitPhotos(siteVisitPhotos, tempSiteVisitId);
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : 'Unknown error occurred';
           alert(`Error uploading photos: ${errorMessage}`);
@@ -1015,30 +1098,61 @@ export default function CallLogsTable({
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `API request failed with status ${response.status}`);
       }
-      // After successful site visit creation, update call log follow-up info
-      // Only send follow-up fields if is_follow_up is true
-      if (siteVisitFormData.is_follow_up) {
-        // Fetch current call log data to preserve details
-        const getCurrentCallLogResponse = await fetch(`${apiBase}/call-log/pagination`, {
-          method: "POST",
-          headers,
-          body: JSON.stringify({
-            page_number: "1",
-            page_size: "10",
-            search_type: "call_log_id",
-            query_search: pipelineInfo.pipelineId,
-          }),
-        });
-        if (getCurrentCallLogResponse.ok) {
-          const currentCallLogData = await getCurrentCallLogResponse.json();
-          if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
-            const currentLog = currentCallLogData[0].data[0];
-            // Prepare the call log update request with the expected structure (no call log detail fetch)
+      // After successful site visit creation, update call log follow-up info or status if needed
+      // Only send follow-up fields if is_follow_up is true or status_id is changed
+      // Map selected contact result to contact_result_description for status_id (like quick call)
+      // Find the selected contact_result_description from site visit dropdown
+      let selectedSiteVisitContactResultDescription: string | undefined = undefined;
+      if (siteVisitFormData.contactResult && siteVisitFormData.contactResult.value && siteVisitContactResultList.length > 0) {
+        const selected = siteVisitContactResultList.find(
+          (item) => item.contact_result_id === parseInt(siteVisitFormData.contactResult!.value, 10)
+        );
+        if (selected && typeof selected.contact_result_description === 'string') {
+          selectedSiteVisitContactResultDescription = selected.contact_result_description;
+        }
+      }
+
+      // Always fetch the current call log to check for status change
+      const getCurrentCallLogResponse = await fetch(`${apiBase}/call-log/pagination`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          page_number: "1",
+          page_size: "10",
+          search_type: "call_log_id",
+          query_search: pipelineInfo.pipelineId,
+        }),
+      });
+      if (getCurrentCallLogResponse.ok) {
+        const currentCallLogData = await getCurrentCallLogResponse.json();
+        if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
+          const currentLog = currentCallLogData[0].data[0];
+          const parentStatusId = String(currentLog.status_id);
+          // Only update if follow-up is set OR status_id is changed
+          if (
+            (siteVisitFormData.is_follow_up && siteVisitFormData.follow_up_date) ||
+            (typeof selectedSiteVisitContactResultDescription === 'string' && parentStatusId !== selectedSiteVisitContactResultDescription)
+          ) {
+            // Map contact_result_id (from site visit) to contact_result_description for status_id
+            let statusId = "1";
+            let selected: ContactResultData | undefined = undefined;
+            if (siteVisitFormData.contactResult && siteVisitFormData.contactResult.value && siteVisitContactResultList.length > 0) {
+              selected = siteVisitContactResultList.find(
+                (item) => item.contact_result_id === parseInt(siteVisitFormData.contactResult!.value, 10)
+              );
+              if (selected && typeof selected.contact_result_description === 'string') {
+                statusId = selected.contact_result_description;
+              } else {
+                // fallback: use value
+                statusId = String(siteVisitFormData.contactResult.value);
+              }
+            }
+            // Prepare the call log update request with the expected structure
             const callLogUpdateRequestBody = {
               call_log_id: pipelineInfo.pipelineId,
               lead_id: currentLog.lead_id,
               property_profile_id: String(currentLog.property_profile_id),
-              status_id: String(currentLog.status_id || "1"),
+              status_id: statusId,
               purpose: currentLog.purpose || "Call pipeline management",
               fail_reason: currentLog.fail_reason || null,
               follow_up_date: siteVisitFormData.follow_up_date
@@ -1098,7 +1212,10 @@ export default function CallLogsTable({
         alert('Error: Call Log ID is missing. Cannot access site visit.');
         return;
       }
-      router.push(`/callpipeline/sitevisit?pipelineId=${callLog.call_log_id}`);
+      // Pass callLogId, leadName, and contactNumber as URL parameters
+  const leadName = encodeURIComponent(callLog.lead_name || '');
+  const contactNumber = encodeURIComponent(callLog.primary_contact_number || '');
+  router.push(`/callpipeline/sitevisit?pipelineId=${callLog.call_log_id}&callLogId=${callLog.call_log_id}&leadName=${leadName}&contactNumber=${contactNumber}`);
     } else if (action === 'loanPaymentSchedule') {
       if (!callLog.call_log_id) {
         alert('Error: Call Log ID is missing. Cannot access loan payment schedule.');
@@ -1129,19 +1246,17 @@ export default function CallLogsTable({
                 </TableRow>
               </TableHeader>
               <TableBody className="divide-y divide-gray-100 dark:divide-white/[0.05]">
-                {data.map((callLog, rowIdx) => (
+                {dataWithLatest.map((callLog, rowIdx) => (
                   <TableRow key={callLog.call_log_id || rowIdx} className="hover:bg-gray-50 dark:hover:bg-white/[0.02]">
                     {callLogColumnConfig.filter(col => visibleColumns.includes(col.key)).map((column) => {
                       const value = callLog[column.key];
                       let displayValue: React.ReactNode;
                       
-                      // Extract and format phone number from lead data
+                      // Extract and format phone number directly from call log data
                       if (column.key === 'phone_number') {
-                        const phoneNumber = leadPhoneNumbers[callLog.lead_id];
+                        const phoneNumber = callLog.primary_contact_number;
                         if (!phoneNumber) {
-                          displayValue = isLoadingPhoneNumbers ? 'Loading...' : 'Unknown Number';
-                        } else if (phoneNumber === 'Unknown Number') {
-                          displayValue = phoneNumber; // Don't format "Unknown Number"
+                          displayValue = 'Unknown Number';
                         } else {
                           displayValue = formatPhoneNumber(phoneNumber);
                         }
@@ -1152,6 +1267,12 @@ export default function CallLogsTable({
                         } else {
                           displayValue = value;
                         }
+                      }
+                      
+                      // Replace "NA" with "Not Set" for Property Name and Property Type columns
+                      if ((column.key === 'property_profile_name' || column.key === 'property_type_name') && 
+                          (displayValue === 'NA' || displayValue === 'na' || displayValue === 'N/A')) {
+                        displayValue = 'Not Set';
                       }
                       
                       // Format property price as currency
@@ -1168,30 +1289,51 @@ export default function CallLogsTable({
                         );
                       }
                       
-                      // Apply dynamic color highlighting for status column
-                      if (column.key === 'status' && (displayValue !== null && displayValue !== undefined && displayValue !== '')) {
+                      // Apply 5-color pill highlighting for pipeline_status column
+                      if (column.key === 'pipeline_status' && (displayValue !== null && displayValue !== undefined && displayValue !== '')) {
                         const statusValue = String(displayValue).toLowerCase();
                         let statusClass = '';
-                        
-                        if (statusValue.includes('follow up') || statusValue.includes('followup')) {
+                        if (statusValue.includes('new')) {
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400';
+                        } else if (statusValue.includes('in progress')) {
                           statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400';
-                        } else if (statusValue.includes('success') || statusValue.includes('won') || statusValue.includes('closed won')) {
+                        } else if (statusValue.includes('site visit')) {
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400';
+                        } else if (statusValue.includes('success') || statusValue.includes('won')) {
                           statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400';
                         } else if (statusValue.includes('fail') || statusValue.includes('failed') || statusValue.includes('lost') || statusValue.includes('closed lost')) {
                           statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400';
                         } else {
-                          // Default status styling for other statuses
-                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400';
+                          // Default: gray
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400';
                         }
-                        
                         displayValue = (
                           <span className={statusClass}>
                             {displayValue}
                           </span>
                         );
                       }
-                      // Apply unique color highlighting for each column (except status)
-                      else if (column.highlight && column.key !== 'status' && (displayValue !== null && displayValue !== undefined && displayValue !== '') && (typeof displayValue === 'string' || typeof displayValue === 'number')) {
+                      // Format and color code latest_status_name as a pill
+                      else if (column.key === 'latest_status_name' && displayValue) {
+                        const statusValue = String(displayValue).toLowerCase();
+                        let statusClass = '';
+                        if (statusValue.includes('progress')) {
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400';
+                        } else if (statusValue.includes('success') || statusValue.includes('won')) {
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400';
+                        } else if (statusValue.includes('fail') || statusValue.includes('lost') || statusValue.includes('cancel')) {
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400';
+                        } else if (statusValue.includes('follow up') || statusValue.includes('followup')) {
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400';
+                        } else {
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400';
+                        }
+                        displayValue = (
+                          <span className={statusClass}>{displayValue}</span>
+                        );
+                      }
+                      // Apply unique color highlighting for each column (except pipeline_status and latest_status_name)
+                      else if (column.highlight && column.key !== 'pipeline_status' && column.key !== 'latest_status_name' && (displayValue !== null && displayValue !== undefined && displayValue !== '') && (typeof displayValue === 'string' || typeof displayValue === 'number')) {
                         let columnClass = '';
                         
                         switch (column.key) {
@@ -1655,7 +1797,7 @@ export default function CallLogsTable({
                 <div>
                   <Label htmlFor="quickSiteVisitContactResult">Site Visit Result *</Label>
                   <Select
-                    options={statusOptions}
+                    options={siteVisitStatusOptions}
                     value={siteVisitFormData.contactResult}
                     onChange={(option) => handleSiteVisitChange('contactResult', option)}
                     placeholder="Select contact result"

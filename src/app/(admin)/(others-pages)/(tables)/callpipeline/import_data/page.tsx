@@ -6,10 +6,10 @@ import ComponentCard from "@/components/common/ComponentCard";
 import Button from "@/components/ui/button/Button";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import SuccessModal from "@/components/ui/modal/SuccessModal";
 
 interface CsvRow {
-  phone_number: string;
-  staff_id: string;
+  [key: string]: string; // Allow any column name with string values
 }
 
 const breadcrumbs = [
@@ -22,8 +22,11 @@ export default function ImportDataPage() {
   const router = useRouter();
   const [csvFile, setCsvFile] = useState<File | null>(null);
   const [csvData, setCsvData] = useState<CsvRow[]>([]);
+  const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string>("");
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [errorModal, setErrorModal] = useState<{ open: boolean; statusCode?: number; message?: string }>({ open: false });
 
   const handleFileChange = (event: React.ChangeEvent<HTMLInputElement>) => {
     const file = event.target.files?.[0];
@@ -34,12 +37,14 @@ export default function ImportDataPage() {
       }
       setCsvFile(file);
       setError("");
+      setErrorModal({ open: false });
       parseCSV(file);
     }
   };
 
   const parseCSV = (file: File) => {
     setIsLoading(true);
+    setErrorModal({ open: false });
     const reader = new FileReader();
     
     reader.onload = (e) => {
@@ -54,9 +59,10 @@ export default function ImportDataPage() {
         }
 
         // Get header row and validate columns
-        const headers = lines[0].split(',').map(h => h.trim().toLowerCase());
-        const phoneIndex = headers.findIndex(h => h.includes('phone'));
-        const staffIndex = headers.findIndex(h => h.includes('staff'));
+        const headers = lines[0].split(',').map(h => h.trim());
+        const headersLower = headers.map(h => h.toLowerCase());
+        const phoneIndex = headersLower.findIndex(h => h.includes('phone'));
+        const staffIndex = headersLower.findIndex(h => h.includes('staff'));
 
         if (phoneIndex === -1 || staffIndex === -1) {
           setError("CSV must contain 'phone_number' and 'staff_id' columns");
@@ -64,15 +70,19 @@ export default function ImportDataPage() {
           return;
         }
 
+        // Store headers for table display
+        setCsvHeaders(headers);
+
         // Parse data rows (first 10 for preview)
         const dataRows: CsvRow[] = [];
         for (let i = 1; i < Math.min(lines.length, 11); i++) {
           const row = lines[i].split(',').map(cell => cell.trim());
-          if (row.length >= Math.max(phoneIndex, staffIndex) + 1) {
-            dataRows.push({
-              phone_number: row[phoneIndex] || "",
-              staff_id: row[staffIndex] || ""
+          if (row.length > 0 && row.some(cell => cell !== '')) { // Skip empty rows
+            const rowData: CsvRow = {};
+            headers.forEach((header, index) => {
+              rowData[header] = row[index] || "";
             });
+            dataRows.push(rowData);
           }
         }
 
@@ -91,15 +101,49 @@ export default function ImportDataPage() {
     if (!csvFile) return;
     
     setIsLoading(true);
+    setError("");
+    
     try {
-      // Here you would implement the actual upload logic
-      // For now, we'll just simulate an upload
-      await new Promise(resolve => setTimeout(resolve, 2000));
+      // Create FormData object
+      const formData = new FormData();
+      formData.append('file', csvFile);
       
-      // After successful upload, redirect back to call pipeline
-      router.push('/callpipeline');
-    } catch {
-      setError("Failed to upload data. Please try again.");
+      // Get API base URL and token
+      const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL?.replace(/\/$/, "") || "";
+      const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+      
+      // Prepare headers
+      const headers: Record<string, string> = {};
+      if (token) {
+        headers["Authorization"] = `Bearer ${token}`;
+      }
+      // Note: Don't set Content-Type header, let browser set it for FormData
+      
+      // Make API call
+      const response = await fetch(`${apiBase}/import-data/lead`, {
+        method: 'POST',
+        headers,
+        body: formData,
+      });
+      
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        throw new Error(errorData.message || `Upload failed with status ${response.status}`);
+      }
+      
+      const result = await response.json();
+      console.log('Upload successful:', result);
+      
+      // Show success modal
+      setShowSuccessModal(true);
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to upload data. Please try again.';
+      setErrorModal({
+        open: true,
+        statusCode: 500,
+        message: errorMessage
+      });
+      console.error('Upload error:', error);
     } finally {
       setIsLoading(false);
     }
@@ -108,7 +152,9 @@ export default function ImportDataPage() {
   const handleCancel = () => {
     setCsvFile(null);
     setCsvData([]);
+    setCsvHeaders([]);
     setError("");
+    setErrorModal({ open: false });
   };
 
   return (
@@ -186,26 +232,24 @@ export default function ImportDataPage() {
                       <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
                         Row #
                       </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Phone Number
-                      </th>
-                      <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
-                        Staff ID
-                      </th>
+                      {csvHeaders.map((header, index) => (
+                        <th key={index} className="px-6 py-3 text-left text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider">
+                          {header}
+                        </th>
+                      ))}
                     </tr>
                   </thead>
                   <tbody className="bg-white dark:bg-gray-900 divide-y divide-gray-200 dark:divide-gray-700">
-                    {csvData.map((row, index) => (
-                      <tr key={index} className="hover:bg-gray-50 dark:hover:bg-gray-800">
+                    {csvData.map((row, rowIndex) => (
+                      <tr key={rowIndex} className="hover:bg-gray-50 dark:hover:bg-gray-800">
                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          {index + 1}
+                          {rowIndex + 1}
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          {row.phone_number || '-'}
-                        </td>
-                        <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
-                          {row.staff_id || '-'}
-                        </td>
+                        {csvHeaders.map((header, colIndex) => (
+                          <td key={colIndex} className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 dark:text-white">
+                            {row[header] || '-'}
+                          </td>
+                        ))}
                       </tr>
                     ))}
                   </tbody>
@@ -230,7 +274,7 @@ export default function ImportDataPage() {
               </Button>
               <Button
                 onClick={handleUpload}
-                disabled={isLoading}
+                disabled={isLoading || !!error || !csvFile}
                 className="min-w-[120px]"
               >
                 {isLoading ? (
@@ -258,6 +302,27 @@ export default function ImportDataPage() {
           </div>
         </div>
       </ComponentCard>
+      
+      {/* Success Modal */}
+      <SuccessModal
+        isOpen={showSuccessModal}
+        onClose={() => {
+          setShowSuccessModal(false);
+          router.push('/callpipeline');
+        }}
+        statusCode={200}
+        message="CSV data imported successfully! Call logs have been created."
+        buttonText="Go to Call Pipeline"
+      />
+      
+      {/* Error Modal */}
+      <SuccessModal
+        isOpen={errorModal.open}
+        onClose={() => setErrorModal({ open: false })}
+        statusCode={errorModal.statusCode}
+        message={errorModal.message}
+        buttonText="Okay, Got It"
+      />
     </div>
   );
 }

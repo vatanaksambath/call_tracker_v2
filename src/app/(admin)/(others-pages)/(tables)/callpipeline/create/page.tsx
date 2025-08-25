@@ -765,6 +765,16 @@ export default function CallPipelineCreateForm() {
         onSearch={handlePropertySearch}
         searchQuery={propertySearchQuery}
         searchType={propertySearchType}
+        extraActions={
+          <Button
+            variant="primary"
+            size="sm"
+            onClick={() => router.push("/property/create")}
+            className="ml-3"
+          >
+            + Create New Property
+          </Button>
+        }
       />
 
       {/* Create New Lead Modal */}

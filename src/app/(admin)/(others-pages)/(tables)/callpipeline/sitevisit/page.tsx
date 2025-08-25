@@ -1,5 +1,20 @@
 "use client";
 import React, { useState, useEffect, useCallback } from "react";
+// Types for API call log (reuse from quickcall page)
+interface ApiCallLog {
+  call_log_id: string;
+  call_date: string;
+  contact_type_id: number;
+  contact_value: string;
+  is_primary: boolean;
+  created_at: string;
+  updated_at: string;
+  caller_name: string;
+  lead_name: string;
+  primary_contact_number: string;
+  created_by_name: string;
+  call_log_details: any[];
+}
 import { useRouter, useSearchParams } from "next/navigation";
 
 // Components
@@ -235,6 +250,10 @@ export default function SiteVisitPage() {
   const searchParams = useSearchParams();
   const pipelineId = searchParams.get('pipelineId') || '';
 
+  // State for current call log info (API-driven only)
+  const [currentCallLog, setCurrentCallLog] = useState<ApiCallLog | null>(null);
+  const [isLoadingCallLog, setIsLoadingCallLog] = useState(false);
+
   const breadcrumbs = [
     { name: "Home", href: "/" },
     { name: "Call Pipeline", href: "/callpipeline" },
@@ -246,14 +265,46 @@ export default function SiteVisitPage() {
   const [isLoadingPipeline, setIsLoadingPipeline] = useState(true);
   const [siteVisitHistory, setSiteVisitHistory] = useState<SiteVisitEntry[]>([]);
   const [isLoadingHistory, setIsLoadingHistory] = useState(true);
-  const [statusOptions, setStatusOptions] = useState<SelectOption[]>([]);
+  // Extend SelectOption to include contact_result_description for robust status mapping
+  type StatusOption = SelectOption & { contact_result_description?: string };
+  type ContactResultApiItem = {
+    contact_result_id?: number;
+    id?: number;
+    contact_result_name?: string;
+    name?: string;
+    contact_result_description?: string;
+  };
+  const [statusOptions, setStatusOptions] = useState<StatusOption[]>([]);
   const [isLoadingStatus, setIsLoadingStatus] = useState(true);
 
   // Statistics State
   const [totalItems, setTotalItems] = useState(0);
   const [totalDuration, setTotalDuration] = useState(0);
-  const [currentSiteVisitId, setCurrentSiteVisitId] = useState<string>('');
-  const [lastVisitLead, setLastVisitLead] = useState<{ name: string; phone: string }>({ name: '', phone: '' });
+  // Fetch call log info for cards (like quickcall page)
+  useEffect(() => {
+    if (!pipelineId) return;
+    setIsLoadingCallLog(true);
+    fetch(`${getApiBase()}/call-log/pagination`, {
+      method: "POST",
+      headers: getApiHeaders(),
+      body: JSON.stringify({
+        page_number: "1",
+        page_size: "1",
+        search_type: "call_log_id",
+        query_search: pipelineId,
+      }),
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data) && data.length > 0 && data[0].data && data[0].data.length > 0) {
+          setCurrentCallLog(data[0].data[0]);
+        } else {
+          setCurrentCallLog(null);
+        }
+      })
+      .catch(() => setCurrentCallLog(null))
+      .finally(() => setIsLoadingCallLog(false));
+  }, [pipelineId]);
 
   // Form State
   const [formData, setFormData] = useState<SiteVisitFormData>(DEFAULT_FORM_DATA);
@@ -287,31 +338,34 @@ export default function SiteVisitPage() {
         headers: getApiHeaders(),
         body: JSON.stringify({ 
           page_number: "1", 
-          page_size: "10",
-          menu_id: "MU_02",
-          search_type: "",
+          page_size: "100",
+          menu_id: "MU_03",
+          search_type: "MU_03",
           query_search: ""
         })
       });
 
       if (response.ok) {
         const data = await response.json();
-        let options: SelectOption[] = [];
+        let options: StatusOption[] = [];
 
         if (Array.isArray(data) && data.length > 0 && Array.isArray(data[0].data)) {
-          options = data[0].data.map((item: any) => ({
+          options = data[0].data.map((item: ContactResultApiItem) => ({
             value: String(item.contact_result_id || item.id),
-            label: String(item.contact_result_name || item.name)
+            label: String(item.contact_result_name || item.name),
+            contact_result_description: item.contact_result_description
           }));
         } else if (Array.isArray(data?.data)) {
-          options = data.data.map((item: any) => ({
+          options = data.data.map((item: ContactResultApiItem) => ({
             value: String(item.contact_result_id || item.id),
-            label: String(item.contact_result_name || item.name)
+            label: String(item.contact_result_name || item.name),
+            contact_result_description: item.contact_result_description
           }));
         } else if (Array.isArray(data)) {
-          options = data.map((item: any) => ({
+          options = data.map((item: ContactResultApiItem) => ({
             value: String(item.contact_result_id || item.id),
-            label: String(item.contact_result_name || item.name)
+            label: String(item.contact_result_name || item.name),
+            contact_result_description: item.contact_result_description
           }));
         }
 
@@ -488,8 +542,6 @@ export default function SiteVisitPage() {
 
         // Calculate statistics
         if (visitArr.length > 0) {
-          setCurrentSiteVisitId(visitArr[0].site_visit_id);
-          
           // Calculate total duration
           let totalDurationMinutes = 0;
           visitArr.forEach(visit => {
@@ -503,17 +555,13 @@ export default function SiteVisitPage() {
           setTotalDuration(totalDurationMinutes);
 
           // Set last visit lead info
-          const lastVisit = visitArr[0];
+          // (Removed lastVisit, no longer needed)
           console.log("🔍 Setting last visit lead - pipelineInfo:", pipelineInfo);
           console.log("📱 callerPhone from pipelineInfo:", pipelineInfo?.callerPhone);
-          setLastVisitLead({
-            name: lastVisit.lead_name || 'N/A',
-            phone: pipelineInfo?.callerPhone || 'N/A'
-          });
+          // (Removed setLastVisitLead, now using pipelineInfo only)
         } else {
-          setCurrentSiteVisitId('');
           setTotalDuration(0);
-          setLastVisitLead({ name: '', phone: '' });
+          // (Removed setLastVisitLead, now using pipelineInfo only)
         }
       } else {
         console.error("Failed to fetch site visit data");
@@ -635,7 +683,6 @@ export default function SiteVisitPage() {
 
     try {
       setIsSubmitting(true);
-      
       // Upload photos first if any
       const photoUrls: string[] = [];
       if (photos.length > 0) {
@@ -658,6 +705,21 @@ export default function SiteVisitPage() {
         ? `${formData.visitDate.toISOString().split('T')[0]} ${formData.visitEndTime}:00`
         : "";
 
+      // Always use contact_result_description for status_id (parent status), matching CallLogsTable.tsx logic
+      let statusId = "1";
+      if (formData.contactResult && formData.contactResult.value && statusOptions.length > 0) {
+        // Find the selected option from statusOptions
+        const selected = statusOptions.find(
+          (item) => String(item.value) === String(formData.contactResult!.value)
+        );
+        // Use contact_result_description from the selected option
+        if (selected && selected.contact_result_description && selected.contact_result_description.length > 0) {
+          statusId = selected.contact_result_description;
+        } else {
+          statusId = String(formData.contactResult.value);
+        }
+      }
+
       const apiRequestBody = {
         call_id: pipelineInfo.pipelineId,
         property_profile_id: String(pipelineInfo.propertyProfileId),
@@ -668,16 +730,11 @@ export default function SiteVisitPage() {
         start_datetime: startDatetime,
         end_datetime: endDatetime,
         photo_url: photoUrls,
-        remark: formData.notes
+        remark: formData.notes,
+        status_id: statusId // <-- robust mapping for call log update
       };
 
-      // TODO: Site visit create API endpoint may not be fully implemented
-      console.log("� Creating site visit via API:", {
-        endpoint: "/site-visit/create",
-        method: "POST",
-        payload: apiRequestBody
-      });
-
+      // Create site visit
       const response = await fetch(`${getApiBase()}/site-visit/create`, {
         method: "POST",
         headers: getApiHeaders(),
@@ -687,6 +744,54 @@ export default function SiteVisitPage() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `API request failed with status ${response.status}`);
+      }
+
+      // After successful site visit creation, update call log status if needed
+      // Always fetch the current call log to check for status change
+      const getCurrentCallLogResponse = await fetch(`${getApiBase()}/call-log/pagination`, {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify({
+          page_number: "1",
+          page_size: "10",
+          search_type: "call_log_id",
+          query_search: pipelineInfo.pipelineId,
+        }),
+      });
+      if (getCurrentCallLogResponse.ok) {
+        const currentCallLogData = await getCurrentCallLogResponse.json();
+        if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
+          const currentLog = currentCallLogData[0].data[0];
+          const parentStatusId = String(currentLog.status_id);
+          if (
+            (formData.isFollowUp && formData.followUpDate) ||
+            (typeof statusId === 'string' && parentStatusId !== statusId)
+          ) {
+            // Prepare the call log update request with the expected structure
+            const callLogUpdateRequestBody = {
+              call_log_id: pipelineInfo.pipelineId,
+              lead_id: currentLog.lead_id,
+              property_profile_id: String(currentLog.property_profile_id),
+              status_id: statusId,
+              purpose: currentLog.purpose || "Call pipeline management",
+              fail_reason: currentLog.fail_reason || null,
+              follow_up_date: formData.followUpDate
+                ? `${formData.followUpDate.getFullYear()}-${String(formData.followUpDate.getMonth() + 1).padStart(2, '0')}-${String(formData.followUpDate.getDate()).padStart(2, '0')}`
+                : null,
+              is_follow_up: formData.isFollowUp,
+              is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
+              updated_by: "1"
+            };
+            console.log('[Quick Site Visit] PUT /call-log/update-info body:', callLogUpdateRequestBody);
+            // Log the callLogUpdateRequestBody before calling the API
+            console.log('callLogUpdateRequestBody:', callLogUpdateRequestBody);
+            await fetch(`${getApiBase()}/call-log/update-info`, {
+              method: "PUT",
+              headers: getApiHeaders(),
+              body: JSON.stringify(callLogUpdateRequestBody),
+            });
+          }
+        }
       }
 
       setShowQuickModal(false);
@@ -712,16 +817,16 @@ export default function SiteVisitPage() {
 
     try {
       setIsEditingSubmitting(true);
-      
+
       // Process photos - upload all new photos and preserve existing ones
       const existingPhotos = editingVisit.photo_url || [];
       const newPhotoFiles = editPhotos.filter(photo => photo.file);
-      
+
       console.log('Existing photos:', existingPhotos);
       console.log('New photo files to upload:', newPhotoFiles.length);
-      
+
       const photoUrls = [...existingPhotos];
-      
+
       // Upload new photos if any
       if (newPhotoFiles.length > 0) {
         console.log("Uploading new photos:", newPhotoFiles.length);
@@ -744,6 +849,19 @@ export default function SiteVisitPage() {
         ? `${editFormData.visitDate.toISOString().split('T')[0]} ${editFormData.visitEndTime}:00`
         : "";
 
+      // Robust mapping: get contact_result_description for status_id (parent status) from selected contactResult
+      let statusId = "1";
+      if (editFormData.contactResult && editFormData.contactResult.value && statusOptions.length > 0) {
+        const selected = statusOptions.find(
+          (item) => String(item.value) === String(editFormData.contactResult!.value)
+        );
+        if (selected && selected.contact_result_description && selected.contact_result_description.length > 0) {
+          statusId = selected.contact_result_description;
+        } else {
+          statusId = String(editFormData.contactResult.value);
+        }
+      }
+
       const apiRequestBody = {
         site_visit_id: editingVisit.site_visit_id,
         call_id: editingVisit.call_id,
@@ -756,16 +874,12 @@ export default function SiteVisitPage() {
         end_datetime: endDatetime,
         photo_url: photoUrls, // Use the combined photo URLs (existing + new uploads)
         remark: editFormData.notes,
-        is_active: editingVisit.is_active
+        is_active: editingVisit.is_active,
+        status_id: statusId // <-- robust mapping for parent status
       };
 
-      // TODO: Site visit update API endpoint may not be fully implemented
-      console.log("� Updating site visit via API:", {
-        endpoint: "/site-visit/update",
-        method: "PUT",
-        payload: apiRequestBody
-      });
-
+      // Log the request body before calling the API
+      console.log('[SiteVisit Edit] PUT /site-visit/update body:', apiRequestBody);
       const response = await fetch(`${getApiBase()}/site-visit/update`, {
         method: "PUT",
         headers: getApiHeaders(),
@@ -775,6 +889,52 @@ export default function SiteVisitPage() {
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
         throw new Error(errorData.message || `API request failed with status ${response.status}`);
+      }
+
+      // After successful site visit update, update call log status if needed (mirror handleCreateSubmit)
+      // Always fetch the current call log to check for status change
+      const getCurrentCallLogResponse = await fetch(`${getApiBase()}/call-log/pagination`, {
+        method: "POST",
+        headers: getApiHeaders(),
+        body: JSON.stringify({
+          page_number: "1",
+          page_size: "10",
+          search_type: "call_log_id",
+          query_search: editingVisit.call_id,
+        }),
+      });
+      if (getCurrentCallLogResponse.ok) {
+        const currentCallLogData = await getCurrentCallLogResponse.json();
+        if (Array.isArray(currentCallLogData) && currentCallLogData.length > 0 && currentCallLogData[0].data && Array.isArray(currentCallLogData[0].data) && currentCallLogData[0].data.length > 0) {
+          const currentLog = currentCallLogData[0].data[0];
+          const parentStatusId = String(currentLog.status_id);
+          // If follow up or status changed, update call log
+          if (
+            (editFormData.isFollowUp && editFormData.followUpDate) ||
+            (typeof statusId === 'string' && parentStatusId !== statusId)
+          ) {
+            const callLogUpdateRequestBody = {
+              call_log_id: editingVisit.call_id,
+              lead_id: currentLog.lead_id,
+              property_profile_id: String(currentLog.property_profile_id),
+              status_id: statusId,
+              purpose: currentLog.purpose || "Call pipeline management",
+              fail_reason: currentLog.fail_reason || null,
+              follow_up_date: editFormData.followUpDate
+                ? `${editFormData.followUpDate.getFullYear()}-${String(editFormData.followUpDate.getMonth() + 1).padStart(2, '0')}-${String(editFormData.followUpDate.getDate()).padStart(2, '0')}`
+                : null,
+              is_follow_up: editFormData.isFollowUp,
+              is_active: currentLog.is_active !== undefined ? currentLog.is_active : true,
+              updated_by: "1"
+            };
+            console.log('[SiteVisit Edit] PUT /call-log/update-info body:', callLogUpdateRequestBody);
+            await fetch(`${getApiBase()}/call-log/update-info`, {
+              method: "PUT",
+              headers: getApiHeaders(),
+              body: JSON.stringify(callLogUpdateRequestBody),
+            });
+          }
+        }
       }
 
       setShowEditModal(false);
@@ -849,15 +1009,7 @@ export default function SiteVisitPage() {
     }
   }, [loadSiteVisitHistory, statusOptions, pipelineInfo]);
 
-  // Update lastVisitLead phone when pipelineInfo changes
-  useEffect(() => {
-    if (pipelineInfo?.callerPhone && lastVisitLead.name && lastVisitLead.name !== 'N/A') {
-      setLastVisitLead(prev => ({
-        ...prev,
-        phone: pipelineInfo.callerPhone
-      }));
-    }
-  }, [pipelineInfo?.callerPhone, lastVisitLead.name]);
+  // (Removed lastVisitLead update effect, now using pipelineInfo only)
 
   // Calculate pagination
   const totalPages = Math.ceil(totalItems / pageSize);
@@ -1094,7 +1246,7 @@ export default function SiteVisitPage() {
                   </div>
                   
                   <div>
-                    <Label htmlFor="quickSiteVisitContactResult">Contact Result *</Label>
+                    <Label htmlFor="quickSiteVisitContactResult">Site Visit Result *</Label>
                     <Select
                       placeholder={isLoadingStatus ? "Loading..." : "Select status"}
                       options={statusOptions}
@@ -1204,102 +1356,94 @@ export default function SiteVisitPage() {
         </Modal>
 
         {/* Site Visit Statistics */}
-        <ComponentCard title="Site Visit Statistics">
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-            {/* Current Site Visit ID */}
-            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-blue-50 to-indigo-50 p-4 dark:border-gray-700 dark:from-blue-900/20 dark:to-indigo-900/20">
-              <div className="absolute top-3 right-3">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/30">
-                  <svg className="h-3 w-3 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z" />
+        <div className="space-y-6">
+          {/* Statistics Cards */}
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2 lg:grid-cols-4">
+            {/* Current Call Log ID Card */}
+            <div className="rounded-sm border border-stroke bg-white p-6 shadow-default dark:border-strokedark dark:bg-boxdark">
+              <div className="flex items-center">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-blue-100 dark:bg-blue-900/20">
+                  <svg className="h-5 w-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
                   </svg>
                 </div>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Current Site Visit ID</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-300">Latest entry</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-blue-800 dark:text-blue-200 leading-tight">
-                    {currentSiteVisitId || 'N/A'}
-                  </p>
+                <div className="ml-4">
+                  <div>
+                    <h4 className="text-lg font-bold text-black dark:text-white">
+                      {currentCallLog ? currentCallLog.call_log_id : 'N/A'}
+                    </h4>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Current Call Log ID
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Total Number of Site Visits */}
-            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-green-50 to-emerald-50 p-4 dark:border-gray-700 dark:from-green-900/20 dark:to-emerald-900/20">
-              <div className="absolute top-3 right-3">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/30">
-                  <svg className="h-3 w-3 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+            {/* Total Number of Site Visits Card */}
+            <div className="rounded-sm border border-stroke bg-white p-6 shadow-default dark:border-strokedark dark:bg-boxdark">
+              <div className="flex items-center">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-green-100 dark:bg-green-900/20">
+                  <svg className="h-5 w-5 text-green-600 dark:text-green-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4" />
                   </svg>
                 </div>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Total Site Visits</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-300">Visit count</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-green-800 dark:text-green-200 leading-tight">
-                    {totalItems}
-                  </p>
+                <div className="ml-4">
+                  <div>
+                    <h4 className="text-lg font-bold text-black dark:text-white">
+                      {totalItems}
+                    </h4>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Total Site Visits
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Sum of Duration */}
-            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-orange-50 to-red-50 p-4 dark:border-gray-700 dark:from-orange-900/20 dark:to-red-900/20">
-              <div className="absolute top-3 right-3">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/30">
-                  <svg className="h-3 w-3 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {/* Sum of Duration Card */}
+            <div className="rounded-sm border border-stroke bg-white p-6 shadow-default dark:border-strokedark dark:bg-boxdark">
+              <div className="flex items-center">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-orange-100 dark:bg-orange-900/20">
+                  <svg className="h-5 w-5 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
                   </svg>
                 </div>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Total Duration</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-300">Time spent</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-orange-800 dark:text-orange-200 leading-tight">
-                    {formatDuration(totalDuration)}
-                  </p>
+                <div className="ml-4">
+                  <div>
+                    <h4 className="text-lg font-bold text-black dark:text-white">
+                      {formatDuration(totalDuration)}
+                    </h4>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">
+                      Total Duration
+                    </span>
+                  </div>
                 </div>
               </div>
             </div>
 
-            {/* Lead Name & Phone */}
-            <div className="relative overflow-hidden rounded-lg border border-gray-200 bg-gradient-to-br from-purple-50 to-pink-50 p-4 dark:border-gray-700 dark:from-purple-900/20 dark:to-pink-900/20">
-              <div className="absolute top-3 right-3">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/30">
-                  <svg className="h-3 w-3 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            {/* Lead Name and Phone Number Card */}
+            <div className="rounded-sm border border-stroke bg-white p-6 shadow-default dark:border-strokedark dark:bg-boxdark">
+              <div className="flex items-center">
+                <div className="flex h-11 w-11 items-center justify-center rounded-full bg-purple-100 dark:bg-purple-900/20">
+                  <svg className="h-5 w-5 text-purple-600 dark:text-purple-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z" />
                   </svg>
                 </div>
-              </div>
-              <div className="space-y-3">
-                <div>
-                  <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Latest Visit Lead</h3>
-                  <p className="text-xs text-gray-600 dark:text-gray-300">Contact info</p>
-                </div>
-                <div className="text-center">
-                  <p className="text-lg font-bold text-purple-800 dark:text-purple-200 leading-tight">
-                    {lastVisitLead.name || 'N/A'}
-                  </p>
-                  <div className="mt-1">
-                    <span className="text-xs text-purple-600 dark:text-purple-300">
-                      {formatPhoneNumber(lastVisitLead.phone) || 'N/A'}
+                <div className="ml-4 min-w-0 flex-1">
+                  <div>
+                    <h4 className="text-lg font-bold text-black dark:text-white truncate">
+                      {currentCallLog && currentCallLog.primary_contact_number ? formatPhoneNumber(currentCallLog.primary_contact_number) : 'No Primary Contact'}
+                    </h4>
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400 truncate block">
+                      {currentCallLog ? currentCallLog.lead_name : 'N/A'}
                     </span>
                   </div>
                 </div>
               </div>
             </div>
           </div>
-        </ComponentCard>
+        </div>
 
         {/* Site Visit History Table */}
         <ComponentCard title="Site Visit History">
@@ -1354,14 +1498,14 @@ export default function SiteVisitPage() {
                               Lead Name
                             </TableCell>
                             <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
-                              Contact Result
+                              Site Visit Result
                             </TableCell>
                             <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
                               Photos
                             </TableCell>
-                            <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
+                            {/* <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
                               Lead Phone
-                            </TableCell>
+                            </TableCell> */}
                             <TableCell isHeader className="px-5 py-3 font-medium text-gray-500 text-start text-theme-xs dark:text-gray-400">
                               Actions
                             </TableCell>
@@ -1439,9 +1583,9 @@ export default function SiteVisitPage() {
                                 </TableCell>
                                 
                                 {/* Lead Phone */}
-                                <TableCell className="px-5 py-4 text-gray-800 text-sm dark:text-gray-300 font-medium">
+                                {/* <TableCell className="px-5 py-4 text-gray-800 text-sm dark:text-gray-300 font-medium">
                                   {formatPhoneNumber(pipelineInfo?.callerPhone || 'N/A')}
-                                </TableCell>
+                                </TableCell> */}
                                 
                                 {/* Actions */}
                                 <TableCell className="px-4 py-3 text-start">
@@ -1620,7 +1764,7 @@ export default function SiteVisitPage() {
                   </div>
                   
                   <div>
-                    <Label htmlFor="editSiteVisitContactResult">Contact Result *</Label>
+                    <Label htmlFor="editSiteVisitContactResult">Site Visit Result *</Label>
                     <Select
                       placeholder={isLoadingStatus ? "Loading..." : "Select status"}
                       options={statusOptions}

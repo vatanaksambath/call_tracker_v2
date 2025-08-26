@@ -240,7 +240,7 @@ const ViewStaffModal = ({ staff, onClose }: { staff: Staff | null; onClose: () =
                     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                         <div className="lg:col-span-1 lg:border-r lg:pr-6 border-gray-200 dark:border-gray-700">
                             <div className="flex flex-col items-center text-center">
-                                <Image src={staff.avatar} alt={staff.fullName} width={128} height={128} className="rounded-full bg-gray-200 mb-4" onError={(e) => { e.currentTarget.src = "/images/user/user-02.jpg"; }}/>
+                                {/* Removed user avatar image as requested */}
                                 <h3 className="text-2xl font-bold text-gray-900 dark:text-white uppercase">{staff.fullName}</h3>
                                 <p className="text-sm text-gray-600 dark:text-gray-400">{staff.staffCode}</p>
                                 <div className="mt-2">
@@ -438,17 +438,9 @@ const StaffTable: React.FC<StaffTableProps> = ({
         switch (columnKey) {
             case 'fullName':
                 return (
-                    <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 overflow-hidden rounded-full">
-                            <Image width={40} height={40} src={staffMember.avatar} alt={staffMember.fullName} onError={(e) => { e.currentTarget.src = "/images/user/user-02.jpg"; }}/>
-                        </div>
-                        <div>
-                            <span className="block font-medium text-gray-800 text-theme-sm dark:text-white/90">
-                                {staffMember.fullName}
-                            </span>
-                            <span className="block text-gray-500 text-theme-xs dark:text-gray-400">{staffMember.staffCode}</span>
-                        </div>
-                    </div>
+                    <Badge size="sm" color="primary" className="bg-violet-50 text-violet-700 font-medium px-3 py-1 rounded-full">
+                        {staffMember.fullName}
+                    </Badge>
                 );
             case 'status':
                 return (
@@ -458,9 +450,9 @@ const StaffTable: React.FC<StaffTableProps> = ({
                 );
             case 'phone':
                 return (
-                    <span className="text-gray-600 dark:text-gray-400">
+                    <Badge size="sm" color="primary" className="bg-violet-50 text-violet-700 font-medium px-3 py-1 rounded-full">
                         {formatPhoneNumber(String(staffMember[columnKey] || 'N/A'))}
-                    </span>
+                    </Badge>
                 );
             default:
                 const value = staffMember[columnKey];

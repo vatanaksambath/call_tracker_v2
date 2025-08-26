@@ -355,6 +355,14 @@ export default function QuickCallCreatePage() {
             value: result.contact_result_id.toString(),
             label: result.contact_result_name
           }));
+          setStatusOptions(options);
+        }
+      } catch (error) {
+        console.error("Error loading contact results:", error);
+      }
+    };
+    loadContactResults();
+  }, []);
 
   const handleCloseModal = () => {
     setShowInputModal(false);

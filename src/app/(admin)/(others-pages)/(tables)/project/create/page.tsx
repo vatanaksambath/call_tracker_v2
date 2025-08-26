@@ -13,15 +13,61 @@ import Address, { IAddress } from "@/components/form/Address";
 
 
 const breadcrumbs = [
-        return results
   { name: "Project", href: "/project" },
   { name: "Create", href: "/project/create" }
 ];
 
-  interface ISelectOption {
+interface FormData {
+  project_name: string;
+  project_description: string;
+  address: IAddress;
+}
+
+interface FormErrors {
+  project_name?: string;
+  project_description?: string;
+  address?: string;
+}
+
+export default function ProjectCreatePage() {
+  const router = useRouter();
+  const [formData, setFormData] = useState<FormData>({
+    project_name: '',
+    project_description: '',
+    address: {
+      province: null,
+      district: null,
+      commune: null,
+      village: null,
+      homeAddress: '',
+      streetAddress: '',
+    },
+  });
+  const [errors, setErrors] = useState<FormErrors>({});
   const [showSuccessModal, setShowSuccessModal] = useState(false);
   const [errorModal, setErrorModal] = useState<{ open: boolean; statusCode?: number; message?: string }>({ open: false });
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  const handleChange = (field: keyof FormData, value: any) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    if (errors[field]) setErrors(prev => ({ ...prev, [field]: undefined }));
+  };
+
+  const validateForm = (): boolean => {
+    const newErrors: FormErrors = {};
+    if (!formData.project_name.trim()) {
+      newErrors.project_name = "Project name is required";
+    }
+    if (!formData.project_description.trim()) {
+      newErrors.project_description = "Description is required";
+    }
+    if (!formData.address.province) {
+      newErrors.address = "Address is required";
+    }
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!validateForm()) {
@@ -51,76 +97,6 @@ const breadcrumbs = [
       setIsSubmitting(false);
     }
   };
-  const [errors, setErrors] = useState<FormErrors>({});
-
-      <SuccessModal
-        isOpen={showSuccessModal}
-        onClose={() => {
-          setShowSuccessModal(false);
-          router.push("/project");
-        }}
-        statusCode={201}
-        message="Project has been created successfully!"
-        buttonText="Go to Projects"
-      />
-      <SuccessModal
-        isOpen={errorModal.open}
-        onClose={() => setErrorModal({ open: false })}
-        statusCode={errorModal.statusCode}
-        message={errorModal.message}
-        buttonText="Okay, Got It"
-      />
-
-
-  const validateForm = (): boolean => {
-    const newErrors: FormErrors = {};
-    if (!formData.project_name.trim()) {
-      newErrors.project_name = "Project name is required";
-    }
-    if (!formData.project_description.trim()) {
-      newErrors.project_description = "Description is required";
-    }
-    if (!formData.address.province) {
-      newErrors.address = "Address is required";
-    }
-    setErrors(newErrors);
-    return Object.keys(newErrors).length === 0;
-  };
-
-  const [apiError, setApiError] = useState<string | null>(null);
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setApiError(null);
-    if (!validateForm()) {
-      return;
-    }
-    setIsSubmitting(true);
-    try {
-      // Prepare payload for API
-      const payload = {
-        developer_id: "20",
-        village_id: formData.address.village?.value || "",
-        project_name: formData.project_name,
-        project_description: formData.project_description
-      };
-      const response = await api.post("/project/create", payload);
-      if (response.status === 200 || response.status === 201) {
-        setShowSuccessModal(true);
-      } else {
-        setApiError("Failed to create project. Unexpected response.");
-      }
-    } catch (err: unknown) {
-      let message = "Failed to create project.";
-      if (typeof err === "object" && err !== null) {
-  // @ts-expect-error: Non-standard error object from axios or API client
-  if (err.response?.data?.message) message = err.response.data.message;
-      }
-      setApiError(message);
-      console.error("Failed to create project:", err);
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
 
   const handleSuccessClose = () => {
     setShowSuccessModal(false);
@@ -129,14 +105,16 @@ const breadcrumbs = [
 
 
 
+
+
   return (
     <>
       <PageBreadcrumb crumbs={breadcrumbs} />
       
       <ComponentCard title="Create New Project" desc="Fill in the details below to create a new project">
-        {apiError && (
+        {errorModal.open && errorModal.message && (
           <div className="mb-4 p-3 bg-red-100 text-red-700 rounded">
-            {apiError}
+            {errorModal.message}
           </div>
         )}
         <form onSubmit={handleSubmit} className="space-y-6">

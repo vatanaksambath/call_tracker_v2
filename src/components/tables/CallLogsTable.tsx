@@ -1295,7 +1295,7 @@ export default function CallLogsTable({
                         let statusClass = '';
                         if (statusValue.includes('new')) {
                           statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400';
-                        } else if (statusValue.includes('in progress')) {
+                        } else if (statusValue.includes('in-progress')) {
                           statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400';
                         } else if (statusValue.includes('site visit')) {
                           statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400';
@@ -1315,18 +1315,17 @@ export default function CallLogsTable({
                       }
                       // Format and color code latest_status_name as a pill
                       else if (column.key === 'latest_status_name' && displayValue) {
-                        const statusValue = String(displayValue).toLowerCase();
+                        const statusStr = String(displayValue).toLowerCase();
                         let statusClass = '';
-                        if (statusValue.includes('progress')) {
-                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-blue-100 text-blue-800 dark:bg-blue-900/20 dark:text-blue-400';
-                        } else if (statusValue.includes('success') || statusValue.includes('won')) {
-                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800 dark:bg-green-900/20 dark:text-green-400';
-                        } else if (statusValue.includes('fail') || statusValue.includes('lost') || statusValue.includes('cancel')) {
-                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-red-100 text-red-800 dark:bg-red-900/20 dark:text-red-400';
-                        } else if (statusValue.includes('follow up') || statusValue.includes('followup')) {
-                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400';
+                        if (
+                          statusStr === 'schedule site visit' ||
+                          statusStr === 'reschedule site visit'
+                        ) {
+                          // Purpose (purple)
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800 dark:bg-purple-900/20 dark:text-purple-400';
                         } else {
-                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800 dark:bg-gray-900/20 dark:text-gray-400';
+                          // All other statuses: yellow
+                          statusClass = 'inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800 dark:bg-yellow-900/20 dark:text-yellow-400';
                         }
                         displayValue = (
                           <span className={statusClass}>{displayValue}</span>
